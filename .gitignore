@@ -5,3 +5,4 @@ __pycache__/
 Data/
 *.npy
 *.mp4
+*.png
