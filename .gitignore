@@ -6,3 +6,4 @@ Data/
 *.npy
 *.mp4
 *.png
+.recorder_config.json

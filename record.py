@@ -72,6 +72,20 @@ FEATURE_DIM = POSE_LANDMARKS * 3 + HAND_LANDMARKS * 3 * 2   # 99 + 63 + 63 = 225
 CAM_INDEX = 0
 PREVIEW_WIDTH = 720
 
+# Remembers the last-used output folder + signer ID across runs, so you don't
+# have to re-browse/retype them every time you relaunch the script. Lives
+# next to this script; machine-local, so it's gitignored.
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".recorder_config.json")
+
+
+def _load_last_settings():
+    try:
+        with open(CONFIG_PATH, "r") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
 
 # --------------------------------------------------------------------------
 # Landmark extraction
@@ -125,8 +139,9 @@ class RecorderApp:
         self.root = root
         self.root.title("NSL Landmark Recorder")
 
-        self.output_dir = tk.StringVar(value="")
-        self.signer_id = tk.StringVar(value="signer01")
+        last = _load_last_settings()
+        self.output_dir = tk.StringVar(value=last.get("output_dir", ""))
+        self.signer_id = tk.StringVar(value=last.get("signer_id", "signer01"))
         self.current_class = tk.StringVar(value=list(CLASSES.keys())[0])
         self.status = tk.StringVar(value="Choose an output folder to begin.")
 
@@ -136,6 +151,20 @@ class RecorderApp:
         self.record_start = None
 
         self._build_ui()
+
+        # Remember the folder/signer as soon as either changes (typing, browsing,
+        # or the restore below), so a crash doesn't lose the latest values.
+        self.output_dir.trace_add("write", lambda *_: self._save_settings())
+        self.signer_id.trace_add("write", lambda *_: self._save_settings())
+
+        # Restore the previously-used output folder, if it still exists.
+        if self.output_dir.get() and os.path.isdir(self.output_dir.get()):
+            self._ensure_class_folders(self.output_dir.get())
+            self.status.set(f"Restored last output folder — {len(CLASSES)} class folders ready.")
+            self._refresh_counts()
+        elif self.output_dir.get():
+            self.status.set("Last output folder no longer exists — choose a new one.")
+            self.output_dir.set("")
         if self._init_camera():
             self._update_frame()
         self._auto_refresh_counts()
@@ -244,13 +273,27 @@ class RecorderApp:
         """
         self.root.focus_set()
 
+    def _save_settings(self):
+        """Persist the output folder + signer ID so the next launch restores them."""
+        try:
+            with open(CONFIG_PATH, "w") as fh:
+                json.dump(
+                    {"output_dir": self.output_dir.get(), "signer_id": self.signer_id.get()},
+                    fh,
+                )
+        except OSError:
+            pass
+
+    def _ensure_class_folders(self, path):
+        os.makedirs(os.path.join(path, "raw"), exist_ok=True)
+        for key in CLASSES:
+            os.makedirs(os.path.join(path, "raw", key), exist_ok=True)
+
     def _pick_folder(self):
         path = filedialog.askdirectory(title="Choose the project data folder")
         if path:
             self.output_dir.set(path)
-            os.makedirs(os.path.join(path, "raw"), exist_ok=True)
-            for key in CLASSES:
-                os.makedirs(os.path.join(path, "raw", key), exist_ok=True)
+            self._ensure_class_folders(path)
             self.status.set(f"Output set. raw/ created with {len(CLASSES)} class folders.")
             self._refresh_counts()
         self._release_focus()

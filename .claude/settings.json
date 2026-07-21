@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python -m py_compile record.py)"
+      "Bash(python -m py_compile record.py)",
+      "Bash(tasklist //FI \"IMAGENAME eq python.exe\")",
+      "PowerShell(Get-CimInstance Win32_Process -Filter \"Name='python.exe'\")",
+      "Bash(taskkill //PID 22320 //F)"
     ]
   }
 }
