@@ -1,5 +1,3 @@
 mediapipe==0.10.14
 pillow==12.3.0
-numpy<2.5   # 2.5.x is Python 3.12+ only; on Python 3.11 this resolves to 2.4.6
-# OpenCV (cv2) is provided transitively by mediapipe as opencv-contrib-python==5.0.0.93.
-# Do NOT also pin opencv-python here — having both installed causes a cv2 conflict.
+numpy<2.5 
