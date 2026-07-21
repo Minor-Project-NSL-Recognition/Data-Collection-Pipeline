@@ -22,7 +22,7 @@ Output layout:
             call_police/
             need_ambulance/
             help_danger/
-            earthquake_trapped/
+            need_toilet/
 
 Feature vector per frame (225 values, fixed order):
     [ pose 33 x (x,y,z) = 99 | left hand 21 x (x,y,z) = 63 | right hand 21 x (x,y,z) = 63 ]
@@ -62,7 +62,7 @@ CLASSES = {
     "call_police":        "3. Call the police (Crime)",
     "need_ambulance":     "4. I need an ambulance (Medical)",
     "help_danger":        "5. Help me / I am in danger (Generic)",
-    "earthquake_trapped": "6. Earthquake / I am trapped (Disaster)",
+    "need_toilet":        "6. I need to go to the toilet (Basic need)",
 }
 
 POSE_LANDMARKS = 33
@@ -138,6 +138,7 @@ class RecorderApp:
         self._build_ui()
         if self._init_camera():
             self._update_frame()
+        self._auto_refresh_counts()
 
     # ---------------------------------------------------------------- UI
 
@@ -245,6 +246,14 @@ class RecorderApp:
             n = len([f for f in os.listdir(d) if f.endswith(".npy")]) if os.path.isdir(d) else 0
             parts.append(f"{key}: {n}")
         self.counts.set("Clips on disk — " + " | ".join(parts))
+
+    def _auto_refresh_counts(self):
+        """Poll the output folder periodically so the counts shown in the GUI
+        stay in sync with whatever is actually on disk — including files or
+        whole class folders removed outside the app (Explorer, another
+        process, etc.), which the app would otherwise never learn about."""
+        self._refresh_counts()
+        self.root.after(1500, self._auto_refresh_counts)
 
     # ------------------------------------------------------------ Camera
 
