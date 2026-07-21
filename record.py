@@ -175,7 +175,8 @@ class RecorderApp:
         )
         for i, (key, label) in enumerate(CLASSES.items()):
             ttk.Radiobutton(
-                main, text=label, value=key, variable=self.current_class
+                main, text=label, value=key, variable=self.current_class,
+                command=self._release_focus,
             ).grid(row=5 + i, column=1, sticky="w")
 
         # --- Record controls
@@ -216,13 +217,24 @@ class RecorderApp:
         if event.widget.winfo_class() in ("TEntry", "Entry"):
             return
         self._toggle()
+        return "break"
 
     def _toggle(self):
-        if self.recording:  
-            
+        if self.recording:
             self.stop_recording()
         else:
             self.start_recording()
+
+    def _release_focus(self):
+        """Send keyboard focus back to the root window.
+
+        If a button or radiobutton keeps focus after being clicked, the NEXT
+        spacebar press triggers that widget's own <space> handling (re-invoking
+        it) in addition to our toggle — e.g. reopening the folder dialog, or
+        firing start+stop in the same keypress. Called after every
+        button/radiobutton action so spacebar toggling stays single-purpose.
+        """
+        self.root.focus_set()
 
     def _pick_folder(self):
         path = filedialog.askdirectory(title="Choose the project data folder")
@@ -233,6 +245,7 @@ class RecorderApp:
                 os.makedirs(os.path.join(path, "raw", key), exist_ok=True)
             self.status.set(f"Output set. raw/ created with {len(CLASSES)} class folders.")
             self._refresh_counts()
+        self._release_focus()
 
     def _refresh_counts(self):
         """Show how many clips exist per class, so you can track collection progress."""
@@ -332,9 +345,11 @@ class RecorderApp:
             return
         if not self.output_dir.get():
             messagebox.showwarning("No output folder", "Choose an output folder first.")
+            self._release_focus()
             return
         if not self.signer_id.get().strip():
             messagebox.showwarning("No signer ID", "Enter a signer ID first.")
+            self._release_focus()
             return
 
         self.buffer = []
@@ -346,6 +361,7 @@ class RecorderApp:
         self.btn_stop.config(state="normal")
         self.btn_discard.config(state="normal")
         self.status.set(f"Recording  →  {self.current_class.get()}  /  {self.signer_id.get()}")
+        self._release_focus()
 
     def stop_recording(self):
         if not self.recording:
@@ -359,9 +375,11 @@ class RecorderApp:
             self.status.set(f"Clip too short ({len(self.buffer)} frames) — discarded.")
             self.buffer = []
             self.frame_flags = []
+            self._release_focus()
             return
 
         self._save_clip()
+        self._release_focus()
 
     def discard_recording(self):
         self.recording = False
@@ -372,6 +390,7 @@ class RecorderApp:
         self.btn_stop.config(state="disabled")
         self.btn_discard.config(state="disabled")
         self.status.set(f"Discarded ({n} frames).")
+        self._release_focus()
 
     def _save_clip(self):
         cls = self.current_class.get()
