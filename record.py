@@ -208,6 +208,7 @@ class RecorderApp:
                   foreground="#555").grid(row=14, column=1, sticky="w", pady=(6, 0))
 
         self.root.bind("<space>", self._on_space)
+        self.root.bind("<Escape>", self._on_escape)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _on_space(self, event):
@@ -217,6 +218,13 @@ class RecorderApp:
         if event.widget.winfo_class() in ("TEntry", "Entry"):
             return
         self._toggle()
+        return "break"
+
+    def _on_escape(self, event):
+        """Escape discards the in-progress recording without saving."""
+        if event.widget.winfo_class() in ("TEntry", "Entry"):
+            return
+        self.discard_recording()
         return "break"
 
     def _toggle(self):
@@ -382,6 +390,8 @@ class RecorderApp:
         self._release_focus()
 
     def discard_recording(self):
+        if not self.recording:
+            return
         self.recording = False
         n = len(self.buffer)
         self.buffer = []
