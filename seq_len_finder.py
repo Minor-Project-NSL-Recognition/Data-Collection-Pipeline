@@ -1,36 +1,49 @@
 import os
-import random
 import numpy as np
+import matplotlib.pyplot as plt
 
-DATA_PATH = r"C:\path\to\your\data"  # change this to your actual path
+DATA_PATH = r"D:\College notes\SEM-6\Minor Project\NSL\Data Collection\Data\raw"
 
-frame_counts = []
 
-for class_name in os.listdir(DATA_PATH):
-    class_path = os.path.join(DATA_PATH, class_name)
-    if not os.path.isdir(class_path):
-        continue
+def load_all_frame_counts():
+    """Walk DATA_PATH and collect every clip's frame count."""
+    frame_counts = []
+    for class_name in os.listdir(DATA_PATH):
+        class_path = os.path.join(DATA_PATH, class_name)
+        if not os.path.isdir(class_path):
+            continue
 
-    # get all .npy files in this class folder
-    npy_files = [f for f in os.listdir(class_path) if f.endswith('.npy')]
+        npy_files = [f for f in os.listdir(class_path) if f.endswith('.npy')]
+        for fname in npy_files:
+            fpath = os.path.join(class_path, fname)
+            data = np.load(fpath)
+            frame_counts.append(data.shape[0])
+    return frame_counts
 
-    if len(npy_files) < 2:
-        print(f"Warning: {class_name} has fewer than 2 .npy files, taking what's available")
 
-    # pick 2 randomly
-    sampled = random.sample(npy_files, min(2, len(npy_files)))
+def main():
+    frame_counts = load_all_frame_counts()
+    print(f"Loaded {len(frame_counts)} clips.\n")
 
-    for fname in sampled:
-        fpath = os.path.join(class_path, fname)
-        data = np.load(fpath)
-        frame_count = data.shape[0]
-        frame_counts.append(frame_count)
-        print(f"{class_name} | {fname} | frames: {frame_count} | shape: {data.shape}")
+    p95 = np.percentile(frame_counts, 95)
 
-print("\n--- Results ---")
-print(f"Total clips sampled : {len(frame_counts)}")
-print(f"Min frames          : {np.min(frame_counts)}")
-print(f"Mean frames         : {np.mean(frame_counts):.1f}")
-print(f"Max frames          : {np.max(frame_counts)}")
-print(f"95th percentile     : {np.percentile(frame_counts, 95):.1f}")
-print(f"\nRecommended SEQ_LEN : {int(np.percentile(frame_counts, 95))}")
+    print("--- Results ---")
+    print(f"Min frames      : {np.min(frame_counts)}")
+    print(f"Mean frames     : {np.mean(frame_counts):.1f}")
+    print(f"Max frames      : {np.max(frame_counts)}")
+    print(f"95th percentile : {p95:.1f}")
+    print(f"\nRecommended SEQ_LEN : {int(round(p95))}")
+
+    plt.figure(figsize=(8, 5))
+    plt.hist(frame_counts, bins=30, color="#55A868", edgecolor="black", alpha=0.8)
+    plt.axvline(p95, color="green", linestyle="--", label=f"95th pct = {p95:.1f}")
+    plt.xlabel("frame count (per clip)")
+    plt.ylabel("number of clips")
+    plt.title(f"Frame-count distribution — all {len(frame_counts)} clips")
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+
+if __name__ == "__main__":
+    main()
