@@ -1,4 +1,5 @@
 .venv/
+.venv-train/
 dataset/
 __pycache__/
 
@@ -7,4 +8,5 @@ Data/
 *.npy
 *.mp4
 *.png
+*.keras
 .recorder_config.json

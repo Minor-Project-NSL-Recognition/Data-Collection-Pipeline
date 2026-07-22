@@ -1,0 +1,12 @@
+{
+  "class_names": [
+    "building_on_fire",
+    "call_police",
+    "cant_breathe",
+    "help_danger",
+    "need_ambulance",
+    "need_toilet"
+  ],
+  "seq_len": 151,
+  "confidence_threshold": 0.75
+}
