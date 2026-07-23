@@ -10,6 +10,7 @@ Controls:  SPACE = record/stop+classify   |   R = clear result   |   Q / Esc = q
 Needs a model from train_model.py. Run:
     python scripts/train_model.py
     python scripts/live_demo.py
+    python scripts/live_demo.py --cam-res 1280x720 --window-size 1600x900
 """
 
 import argparse
@@ -31,20 +32,38 @@ from nslr.landmarks import extract_frame_vector
 from nslr.preprocess import normalize_clip, standardize_length
 
 
-def draw_panel(frame, lines, org=(10, 10), pad=8):
-    """Draw a translucent black box with white text lines at the top-left."""
-    font, scale, thick = cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1
+WINDOW = "NSL live tester"
+
+
+def parse_size(text, flag):
+    """'1280x720' -> (1280, 720)."""
+    try:
+        w, h = (int(v) for v in str(text).lower().split("x"))
+        if w <= 0 or h <= 0:
+            raise ValueError
+        return w, h
+    except ValueError:
+        raise SystemExit(f"{flag} expects WIDTHxHEIGHT, e.g. 1280x720 (got {text!r})")
+
+
+def draw_panel(frame, lines, org=(10, 10), scale=0.6):
+    """Draw a translucent black box with white text lines at the top-left.
+    Everything is derived from `scale` so the panel keeps its proportions at any
+    capture resolution (scale=0.6 reproduces the original 640-wide layout)."""
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    thick = max(1, round(scale * 1.6))
+    pad, gap = round(scale * 13), round(scale * 17)
     sizes = [cv2.getTextSize(t, font, scale, thick)[0] for t, _ in lines]
     w = max((s[0] for s in sizes), default=0) + 2 * pad
-    h = sum(s[1] + 10 for s in sizes) + pad
+    h = sum(s[1] + gap for s in sizes) + pad
     x, y = org
     overlay = frame.copy()
     cv2.rectangle(overlay, (x, y), (x + w, y + h), (0, 0, 0), -1)
     cv2.addWeighted(overlay, 0.55, frame, 0.45, 0, frame)
-    cy = y + pad + 12
+    cy = y + pad + round(scale * 20)
     for (text, color) in lines:
         cv2.putText(frame, text, (x + pad, cy), font, scale, color, thick, cv2.LINE_AA)
-        cy += cv2.getTextSize(text, font, scale, thick)[0][1] + 10
+        cy += cv2.getTextSize(text, font, scale, thick)[0][1] + gap
 
 
 def classify(predictor, ood_stats, buffer, seq_len, class_names):
@@ -73,6 +92,12 @@ def main():
                    help="override the open-set reject distance (higher = more lenient)")
     p.add_argument("--no-ood", action="store_true",
                    help="disable open-set rejection entirely (accept whatever softmax picks)")
+    p.add_argument("--cam-res", default=None, metavar="WxH",
+                   help="capture resolution to request from the camera, e.g. 1280x720 "
+                        "(default: whatever the camera gives)")
+    p.add_argument("--window-size", default=None, metavar="WxH",
+                   help="initial window size, e.g. 1600x900 (default: match the frame). "
+                        "The window is drag-resizable either way.")
     a = p.parse_args()
 
     model_path = os.path.join(a.results, "model.keras")
@@ -107,6 +132,23 @@ def main():
     cap = cv2.VideoCapture(a.cam)
     if not cap.isOpened():
         raise SystemExit(f"Could not open camera {a.cam}")
+    want = parse_size(a.cam_res, "--cam-res") if a.cam_res else None
+    if want:
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, want[0])
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, want[1])
+    ok, probe = cap.read()          # cameras only report the size they settled on after a read
+    if not ok:
+        raise SystemExit(f"Camera {a.cam} opened but returned no frames.")
+    frame_h, frame_w = probe.shape[:2]
+    if want and want != (frame_w, frame_h):
+        print(f"Camera refused {want[0]}x{want[1]}; using {frame_w}x{frame_h}.")
+    hud_scale = 0.6 * frame_w / 640          # keep the overlay proportional at any resolution
+
+    # WINDOW_NORMAL, not imshow's implicit WINDOW_AUTOSIZE, is what makes it resizable.
+    cv2.namedWindow(WINDOW, cv2.WINDOW_NORMAL)
+    win = parse_size(a.window_size, "--window-size") if a.window_size else (frame_w, frame_h)
+    cv2.resizeWindow(WINDOW, win[0], win[1])
+
     holistic = mp.solutions.holistic.Holistic(
         min_detection_confidence=0.5, min_tracking_confidence=0.5, model_complexity=1)
     drawing, styles = mp.solutions.drawing_utils, mp.solutions.drawing_styles
@@ -141,9 +183,9 @@ def main():
             panel.append((f"REC  {len(buffer)} frames  {time.time() - rec_start:0.1f}s", (0, 0, 255)))
         panel.append(result_line)
         panel.extend(top3_lines)
-        draw_panel(frame, panel)
+        draw_panel(frame, panel, scale=hud_scale)
 
-        cv2.imshow("NSL live tester", frame)
+        cv2.imshow(WINDOW, frame)
         key = cv2.waitKey(1) & 0xFF
 
         if key == ord(" "):
