@@ -22,6 +22,10 @@ CLASSES = {
     "need_ambulance":   "4. I need an ambulance (Medical)",
     "help_danger":      "5. Help me / I am in danger (Generic)",
     "need_toilet":      "6. I need to go to the toilet (Basic need)",
+    # Optional 7th "negative" class for open-set training: rest, random motion,
+    # partial/mixed gestures. The pipeline ignores it until it has clips, then
+    # trains it as a real class. Record into it to teach the model "not a sign".
+    "none":             "7. Unknown / none of the above (negatives)",
 }
 
 POSE_LANDMARKS = 33

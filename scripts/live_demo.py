@@ -26,6 +26,7 @@ import mediapipe as mp
 import numpy as np
 
 from nslr import config as C
+from nslr import ood
 from nslr.landmarks import extract_frame_vector
 from nslr.preprocess import normalize_clip, standardize_length
 
@@ -46,15 +47,20 @@ def draw_panel(frame, lines, org=(10, 10), pad=8):
         cy += cv2.getTextSize(text, font, scale, thick)[0][1] + 10
 
 
-def classify(model, buffer, seq_len, class_names, threshold):
-    """buffer: list of raw 225-vectors -> (label_key, confidence, top3)."""
+def classify(predictor, ood_stats, buffer, seq_len, class_names):
+    """buffer: list of raw 225-vectors -> (label_key, confidence, top3, ood_distance).
+    predictor outputs [softmax, embedding]; ood_distance is None if no gate is loaded."""
     clip = np.stack(buffer).astype(np.float32)
     fixed, _, _ = standardize_length(normalize_clip(clip), seq_len)
-    probs = model.predict(fixed[None, ...], verbose=0)[0]
+    probs, z = predictor.predict(fixed[None, ...], verbose=0)
+    probs = probs[0]
     order = np.argsort(probs)[::-1]
     top3 = [(class_names[i], float(probs[i])) for i in order[:3]]
-    best_i = int(order[0])
-    return class_names[best_i], float(probs[best_i]), top3
+    dist = None
+    if ood_stats is not None:
+        means, precision, _ = ood_stats
+        dist = float(ood.mahalanobis_min(z, means, precision)[0][0])
+    return class_names[int(order[0])], float(probs[order[0]]), top3, dist
 
 
 def main():
@@ -62,7 +68,11 @@ def main():
     p.add_argument("--results", default=C.RESULTS_DIR)
     p.add_argument("--cam", type=int, default=0)
     p.add_argument("--threshold", type=float, default=None,
-                   help="override the confidence threshold stored in model_meta.json")
+                   help="override the softmax confidence threshold stored in model_meta.json")
+    p.add_argument("--ood-threshold", type=float, default=None,
+                   help="override the open-set reject distance (higher = more lenient)")
+    p.add_argument("--no-ood", action="store_true",
+                   help="disable open-set rejection entirely (accept whatever softmax picks)")
     a = p.parse_args()
 
     model_path = os.path.join(a.results, "model.keras")
@@ -72,11 +82,27 @@ def main():
 
     from tensorflow import keras
     model = keras.models.load_model(model_path)
+    # one forward pass -> [softmax, embedding], so the gate reuses the same features.
+    predictor = keras.Model(model.inputs, [model.layers[-1].output, model.layers[-2].output])
     with open(meta_path) as fh:
         meta = json.load(fh)
     class_names = meta["class_names"]
     seq_len = meta["seq_len"]
     threshold = a.threshold if a.threshold is not None else meta.get("confidence_threshold", 0.75)
+
+    ood_stats = None
+    ood_path = os.path.join(a.results, "ood_stats.npz")
+    if a.no_ood:
+        print("Open-set rejection DISABLED (--no-ood): showing softmax's top pick.")
+    elif os.path.exists(ood_path):
+        means, precision, ood_thr, _ = ood.load_stats(ood_path)
+        if a.ood_threshold is not None:
+            ood_thr = a.ood_threshold
+        ood_stats = (means, precision, ood_thr)
+        print(f"Open-set gate ON (reject distance > {ood_thr:.1f}). "
+              f"Watch the [dist ..] readout; raise with --ood-threshold or turn off with --no-ood.")
+    else:
+        print("No ood_stats.npz — running without open-set rejection.")
 
     cap = cv2.VideoCapture(a.cam)
     if not cap.isOpened():
@@ -131,13 +157,19 @@ def main():
                     result_line = (f"Too short ({len(buffer)} frames)", (0, 165, 255))
                     top3_lines = []
                 else:
-                    key_name, conf, top3 = classify(model, buffer, seq_len, class_names, threshold)
+                    key_name, conf, top3, dist = classify(predictor, ood_stats, buffer, seq_len, class_names)
                     label = C.CLASSES.get(key_name, key_name)
-                    if conf >= threshold:
+                    is_ood = ood_stats is not None and dist > ood_stats[2]
+                    if is_ood:
+                        result_line = (f"Unknown sign — rejected (dist {dist:.1f})", (0, 0, 255))
+                    elif conf >= threshold:
                         result_line = (f"{label}   {conf:.0%}", (0, 255, 0))
                     else:
                         result_line = (f"Not confident (best: {key_name} {conf:.0%})", (0, 165, 255))
+                    dtxt = f"  [dist {dist:.1f}]" if dist is not None else ""
                     top3_lines = [(f"   {k}: {c:.0%}", (200, 200, 200)) for k, c in top3]
+                    if dtxt:
+                        top3_lines.append((dtxt.strip(), (150, 150, 150)))
         elif key in (ord("r"), ord("R")):
             result_line = ("Press SPACE to record a sign", (200, 200, 200))
             top3_lines = []

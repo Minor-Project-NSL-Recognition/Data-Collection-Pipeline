@@ -32,9 +32,9 @@ def train_one(X_tr, y_tr, X_val, y_val, n_classes, epochs, batch_size, verbose):
     from tensorflow import keras
     from sklearn.utils.class_weight import compute_class_weight
 
-    classes = np.arange(n_classes)
-    weights = compute_class_weight("balanced", classes=classes, y=y_tr)
-    class_weight = {int(c): float(w) for c, w in zip(classes, weights)}
+    present = np.unique(y_tr)
+    weights = compute_class_weight("balanced", classes=present, y=y_tr)
+    class_weight = {int(c): float(w) for c, w in zip(present, weights)}
 
     model = build_bilstm(X_tr.shape[1], X_tr.shape[2], n_classes)
     es = keras.callbacks.EarlyStopping(monitor="val_loss", patience=15, restore_best_weights=True)

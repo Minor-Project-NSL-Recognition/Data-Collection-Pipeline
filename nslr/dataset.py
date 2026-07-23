@@ -18,10 +18,15 @@ def compile_dataset(data_path=C.RAW_DIR, out_dir=C.PROCESSED_DIR,
     if seq_len is None:
         seq_len = load_seq_len(out_dir)
 
-    class_names = sorted(d for d in os.listdir(data_path)
-                         if os.path.isdir(os.path.join(data_path, d)))
+    # Only classes that actually contain clips — an empty folder (e.g. a
+    # not-yet-recorded 'none' class) must not create a zero-sample label.
+    class_names = sorted(
+        d for d in os.listdir(data_path)
+        if os.path.isdir(os.path.join(data_path, d))
+        and any(f.endswith(".npy") for f in os.listdir(os.path.join(data_path, d)))
+    )
     if not class_names:
-        raise SystemExit(f"No class folders under {data_path}")
+        raise SystemExit(f"No non-empty class folders under {data_path}")
     label_map = {name: i for i, name in enumerate(class_names)}
 
     X, masks, y, manifest, dropped = [], [], [], [], []
@@ -99,9 +104,13 @@ def load_processed(processed_dir=C.PROCESSED_DIR):
 
 
 def eligible_test_signers(y, signers, n_classes):
-    """Signers that recorded all n_classes phrases (only these can be a test fold)."""
+    """Signers that can be held out for a leave-one-signer-out fold: removing the
+    signer must still leave EVERY class present in the training remainder,
+    otherwise the model can't learn a class it will be scored on. (A class held
+    by only one signer therefore can't be tested signer-independently.)"""
+    all_labels = set(range(n_classes))
     return [s for s in sorted(set(signers))
-            if len(set(y[signers == s].tolist())) == n_classes]
+            if set(y[signers != s].tolist()) == all_labels]
 
 
 def _read_any_hand(json_path):

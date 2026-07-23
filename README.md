@@ -77,8 +77,24 @@ python scripts/live_demo.py                      # opens the webcam
 In the tester: **SPACE** to start a sign, **SPACE** again to stop and classify,
 **R** to clear, **Q**/**Esc** to quit. It's segment-based (record a whole sign,
 then predict) because the model expects one complete sign per input and has no
-"idle" class — continuous always-on prediction would be unreliable. A confidence
-threshold (default 0.75) suppresses unsure guesses.
+"idle" class — continuous always-on prediction would be unreliable.
+
+### Rejecting unknown / wrong signs (open-set)
+
+A 6-class softmax is closed-world: it always picks one of the 6, confidently,
+even for a wrong or mixed sign. Two defenses:
+
+1. **Distance gate (built in).** `train_model.py` fits a prototype per class in
+   the model's embedding space and stores it in `results/ood_stats.npz`. The demo
+   rejects an input whose Mahalanobis distance to every known sign exceeds a
+   threshold, showing *"Unknown sign — rejected"* regardless of the softmax score.
+2. **A real `none` class (fuller fix, needs recording).** Record rest / random /
+   partial / mixed gestures into the `none` class (it appears in `record.py`), then
+   re-run `build_dataset.py` + `train_model.py`. The pipeline picks up `none`
+   automatically once it has clips and trains it as a 7th "not a sign" class.
+
+Neither fully eliminates confident-wrong on out-of-distribution input — that is a
+fundamental property of neural classifiers — but together they cut it sharply.
 
 ## Notes
 
