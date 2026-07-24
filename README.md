@@ -1,13 +1,17 @@
-# NSL Emergency-Phrase Recognition — Data & Model Pipeline
+# NSL Emergency-Phrase Recognition — Data & Preprocessing Pipeline
+
+> **Branch scope — `mid-defense-preprocessing`.** This branch contains **only the
+> data collection and preprocessing stages** (webcam → landmarks → normalized,
+> fixed-length tensors), for the mid-defense checkpoint. The model, training,
+> open-set rejection, and live inference stages live on `master`. For a detailed
+> walkthrough with the reasoning behind every step, see
+> **[MID_DEFENSE_PREPROCESSING.md](MID_DEFENSE_PREPROCESSING.md)**.
 
 Landmark-based recognition of six Nepali Sign Language (NSL) emergency phrases
-(MediaPipe Holistic → dual-anchor normalization → BiLSTM). This repo is the
-offline data + training side of a larger project; `main.pdf` (the full
-proposal) is kept outside this repo, so code comments referencing "proposal
-X.Y" won't resolve to a local file.
-
-The current committed model reaches **99.7% signer-independent accuracy**
-across 6 classes — see [Current results](#current-results).
+(plus a `none` negatives class): MediaPipe Holistic → dual-anchor normalization →
+fixed-length tensors ready for a sequence model. This repo is the offline data
+side of a larger project; `main.pdf` (the full proposal) is kept outside this
+repo, so code comments referencing "proposal X.Y" won't resolve to a local file.
 
 ## The six phrases
 
@@ -20,28 +24,24 @@ across 6 classes — see [Current results](#current-results).
 | `help_danger` | 5. Help me / I am in danger (Generic) |
 | `need_toilet` | 6. I need to go to the toilet (Basic need) |
 
-(Phrase #6 is `need_toilet` by design — the proposal text still says
+Plus `none` — negatives (rest, random motion, not-a-sign) for later open-set
+rejection. (Phrase #6 is `need_toilet` by design — the proposal text still says
 "earthquake"; the data/code here is the source of truth.)
 
-## Layout
+## Layout (this branch)
 
 ```
 nslr/                  importable package — single source of truth
   config.py            locked constants, class list, paths, seq_len fallback
   landmarks.py         MediaPipe result -> 225-vector
   preprocess.py        dual-anchor normalization + length standardization
-  dataset.py           raw clips -> X/mask/y ; load back for training
-  model.py             the BiLSTM architecture (build_bilstm)
+  dataset.py           raw clips -> X/mask/y ; load back + signer-split helpers
 scripts/               thin entrypoints (import nslr)
   record.py            GUI landmark recorder (webcam -> raw clips)
   find_seq_len.py      derive SEQ_LEN from the recorded frame-count distribution
   build_dataset.py     compile normalized, fixed-length tensors
-  train_eval.py        signer-independent + random-split evaluation (metrics only)
-  train_model.py       train one deployable model on all data -> model.keras
-  live_demo.py         webcam tester using the saved model
 notebooks/             experiments (import nslr; don't define core logic here)
 data/                  raw/ (recorded clips) and processed/ (generated tensors) — created locally, gitignored
-results/               metrics.json, model_meta.json (committed) + model.keras, PNGs (generated, gitignored)
 requirements.txt       pinned Python dependencies
 ```
 
@@ -50,23 +50,20 @@ and notebooks stay thin — they import `nslr`.
 
 > **Note on data location:** the code defaults to `data/raw` and
 > `data/processed` under the repo root (`nslr/config.py`). Every pipeline
-> script also accepts `--data`/`--processed` overrides, so you can instead
-> point them at a separately-cloned dataset repo (e.g. a sibling
-> `dataset/raw/...` checkout) if your recorded clips live in their own git
-> repository. Either layout works as long as the folders match what
+> script also accepts `--data`/`--out` overrides, so you can instead point them
+> at a separately-cloned dataset repo if your recorded clips live in their own
+> git repository. Either layout works as long as the folders match what
 > `record.py` produced.
 
 ## Prerequisites
 
-- **Python 3.11** recommended. `mediapipe`, `tensorflow`, and `numpy` are
-  pinned to versions that are known to work together on 3.11; Python 3.12+
-  may fail to resolve some of these pins.
-- A **webcam** (for `record.py` and `live_demo.py`). Training/evaluation
-  (`build_dataset.py`, `train_eval.py`, `train_model.py`) don't need one.
-- Runs fine on **CPU** — TensorFlow has no native-Windows GPU support (≥2.11)
-  and the model is small (~192k params). For GPU, use WSL2 or Colab instead.
-- No API keys, accounts, or external services are required anywhere in this
-  pipeline — all "data collection" is local webcam recording.
+- **Python 3.11** recommended. `mediapipe` and `numpy` are pinned to versions
+  known to work together on 3.11; Python 3.12+ may fail to resolve some pins.
+- A **webcam** (for `record.py` only). `find_seq_len.py` and `build_dataset.py`
+  don't need one — and don't need TensorFlow either, just NumPy/Matplotlib.
+- Runs fine on **CPU**.
+- No API keys, accounts, or external services anywhere — all "data collection" is
+  local webcam recording.
 
 ## Setup (one environment)
 
@@ -76,12 +73,7 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-Versions are pinned as a coherent set (mediapipe + TensorFlow in one env forces
-an older stack — see the comments in `requirements.txt`).
-
-## Quickstart
-
-If you just want to see the pipeline run end-to-end from scratch:
+## Quickstart — the preprocessing pipeline
 
 ```bash
 # 1. Record a few clips per phrase (GUI opens your webcam)
@@ -90,28 +82,20 @@ python scripts/record.py
 # 2. Derive SEQ_LEN from what you recorded
 python scripts/find_seq_len.py
 
-# 3. Build normalized tensors for training
+# 3. Build normalized tensors (the output of this stage)
 python scripts/build_dataset.py
-
-# 4. Evaluate (prints accuracy; saves metrics + plots, no model file)
-python -u scripts/train_eval.py --verbose 2
-
-# 5. Train a deployable model
-python scripts/train_model.py
-
-# 6. Try it live on your webcam
-python scripts/live_demo.py
 ```
 
-You'll need at least a handful of clips per class, ideally from more than one
-signer, before steps 4–6 produce meaningful results (see
-[Current results](#current-results) for the scale of data that produced
-99.7% accuracy: ~130–160 files per class across 4 signers).
+You'll want at least a handful of clips per class, ideally from more than one
+signer. The committed dataset that this checkpoint is built on is **570 clips**
+across **7 classes** and **4 signers** (~20 clips per signer per class).
 
 ## Pipeline — details
 
-Each step reads the previous step's output; re-run the chain end-to-end
-whenever new recordings land in `data/raw/`.
+Each step reads the previous step's output; re-run the chain end-to-end whenever
+new recordings land in `data/raw/`. **See
+[MID_DEFENSE_PREPROCESSING.md](MID_DEFENSE_PREPROCESSING.md) for the full
+reasoning behind each step** — the summary below is just the commands.
 
 ### 1. Record clips
 
@@ -120,8 +104,8 @@ python scripts/record.py
 ```
 
 Tkinter GUI: pick an output folder and a signer ID, select a phrase, then
-**Start/Stop** (or **SPACE**) to record a clip, **Esc** to discard an
-in-progress recording. Each clip is saved as:
+**Start/Stop** (or **SPACE**) to record a clip, **Esc** to discard an in-progress
+recording. Each clip is saved as:
 
 ```
 data/raw/<class>/<class>__<signer>__<index>.npy   # (n_frames, 225) landmark array
@@ -137,9 +121,9 @@ Your last-used folder/signer is remembered in `.recorder_config.json`
 python scripts/find_seq_len.py                 # add --show to view the histogram
 ```
 
-Scans clip frame counts and picks `SEQ_LEN` at the 95th percentile (override
-with `--percentile`). Writes `data/processed/seq_len.json` and a histogram
-PNG. If this step is skipped, later scripts fall back to `SEQ_LEN=151`.
+Scans clip frame counts and picks `SEQ_LEN` at the 95th percentile (override with
+`--percentile`). Writes `data/processed/seq_len.json` and a histogram PNG. If
+skipped, later scripts fall back to `SEQ_LEN=151`.
 
 ### 3. Build the dataset
 
@@ -147,89 +131,27 @@ PNG. If this step is skipped, later scripts fall back to `SEQ_LEN=151`.
 python scripts/build_dataset.py                 # --min-hand-detect 0.5 to drop weak clips
 ```
 
-Normalizes every clip (dual-anchor: shoulders for pose, wrist/MCP for each
-hand) and standardizes it to a fixed length (subsample if longer, zero-pad if
-shorter). Writes to `data/processed/`:
+Normalizes every clip (dual-anchor: shoulders for pose, wrist/MCP for each hand)
+and standardizes it to a fixed length (subsample if longer, zero-pad if shorter).
+Writes to `data/processed/`:
 
 - `X.npy` — `(N, seq_len, 225)` float tensor
 - `mask.npy` — `(N, seq_len)` boolean padding mask
 - `y.npy` — `(N,)` integer labels
-- `label_map.json`, `manifest.csv` — bookkeeping
+- `label_map.json`, `manifest.csv` — bookkeeping (incl. signer per sample)
 - `dropped.csv` — clips excluded by `--min-hand-detect`, if any
 
-### 4. Train + evaluate
-
-```bash
-python -u scripts/train_eval.py --verbose 2
-```
-
-(`-u` = unbuffered stdout so progress prints live; `--verbose 2` = one line
-per epoch.) Runs two protocols with a fixed seed (42):
-
-1. **Signer-independent (leave-one-signer-out)** — for each signer who has
-   all 6 classes recorded, train on everyone else and test on them.
-2. **Random-split baseline** — stratified 70/15/15 split.
-
-Model is `nslr.model.build_bilstm()` — a small Bidirectional-LSTM classifier
-with masking (for padded frames), dropout, and class-balanced weighting,
-trained with early stopping on validation loss. **This script only measures
-accuracy — it does not save a model.** Outputs:
-
-- `results/metrics.json` — fold accuracies, confusion matrix, per-class
-  precision/recall/F1
-- `results/confusion_matrix_signer_indep.png`
-- `results/training_curves.png`
-
-### 5. Train a deployable model
-
-```bash
-python scripts/train_model.py
-```
-
-Trains one BiLSTM on **all** processed data (85/15 train/val split) and
-saves:
-
-- `results/model.keras` — the trained model
-- `results/model_meta.json` — `class_names`, `seq_len`, `confidence_threshold`
-
-### 6. Try it live
-
-```bash
-python scripts/train_model.py                   # -> results/model.keras + model_meta.json
-python scripts/live_demo.py                      # opens the webcam
-```
-
-In the tester: **SPACE** to start a sign, **SPACE** again to stop and classify,
-**R** to clear, **Q**/**Esc** to quit. It's segment-based (record a whole sign,
-then predict) because the model expects one complete sign per input and has no
-"idle" class — continuous always-on prediction would be unreliable. A confidence
-threshold (default 0.75) suppresses unsure guesses.
-
-## Current results
-
-From the committed `results/metrics.json` (6 classes, seq_len=151, 4 signers,
-~130–160 clips per class):
-
-| Protocol | Accuracy |
-|---|---|
-| Signer-independent (mean over 3 held-out signers) | 99.74% |
-| Signer-independent (pooled) | 99.73% |
-| Random-split baseline | 98.59% |
-
-All per-class F1 scores are ≥0.99. Re-running `train_eval.py` on your own
-recordings will overwrite this file with your own numbers.
+That completes the preprocessing stage: `data/processed/` now holds model-ready
+tensors.
 
 ## Repo housekeeping notes
 
-- **No `LICENSE` or `CONTRIBUTING.md`** exists yet in this repo — add one if
-  you plan to open it up beyond the project team.
 - **`main.pdf`** (the design proposal referenced in code comments as
-  "proposal 3.3", "4.3.5", etc.) is not part of this repo; treat those
-  comments as pointers to an external document, not a local file.
-- `data/`, `results/*.png`, `results/*.keras`, and `.recorder_config.json`
-  are all gitignored — expect to regenerate them locally rather than finding
-  them after a fresh clone.
-- `notebooks/` currently only contains a `README.md` with conventions
-  (import `nslr`, keep notebooks thin) — no notebooks are committed yet.
-- Steps 2–4 above only regenerate `data/processed/` and `results/`; they
-  never touch `data/raw/`. Delete those two folders to reset from scratch.
+  "proposal 3.3", "4.3.5", etc.) is not part of this repo; treat those comments
+  as pointers to an external document, not a local file.
+- `data/` and `.recorder_config.json` are gitignored — expect to regenerate
+  `data/processed/` locally rather than finding it after a fresh clone.
+- Steps 2–3 only regenerate `data/processed/`; they never touch `data/raw/`.
+  Delete `data/processed/` to rebuild from scratch.
+- The model, training, evaluation, open-set rejection, and live-demo code are on
+  `master`, not on this preprocessing-scope branch.

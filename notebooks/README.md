@@ -11,8 +11,12 @@ Start a notebook with:
 import sys, os
 sys.path.insert(0, os.path.abspath(".."))   # repo root, so `import nslr` works
 from nslr.dataset import load_processed
-from nslr.model import build_bilstm
+from nslr.preprocess import normalize_clip, standardize_length
 ```
 
-Good candidates: frame-count / detection-quality EDA, training curves and
-confusion-matrix analysis, per-signer error inspection.
+Good candidates (preprocessing scope): frame-count distribution EDA, detection-
+quality (`any_hand_detect_rate`) inspection, before/after normalization sanity
+checks, per-signer clip-count balance.
+
+> This is the `mid-defense-preprocessing` branch — model/training code
+> (`nslr.model`, `train_eval.py`) lives on `master`.
