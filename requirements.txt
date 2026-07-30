@@ -1,5 +1,14 @@
+#   python -m venv .venv
+#   .venv\Scripts\activate      
+#   pip install -r requirements.txt
+
 mediapipe==0.10.14
+opencv-contrib-python==4.10.0.84
+numpy==1.26.4
+protobuf==4.25.9
+jax==0.4.31
+jaxlib==0.4.31
+tensorflow==2.17.1
+scikit-learn==1.9.0
+matplotlib==3.11.1
 pillow==12.3.0
-numpy<2.5   # 2.5.x is Python 3.12+ only; on Python 3.11 this resolves to 2.4.6
-# OpenCV (cv2) is provided transitively by mediapipe as opencv-contrib-python==5.0.0.93.
-# Do NOT also pin opencv-python here — having both installed causes a cv2 conflict.

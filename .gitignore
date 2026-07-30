@@ -1,11 +1,18 @@
 miniproenv/
 dataset/
 .venv/
-
+.venv-train/
+dataset/
 __pycache__/
 
+    
 Data/
 *.npy
 *.mp4
 *.png
+<<<<<<< HEAD
 
+=======
+*.keras
+.recorder_config.json
+>>>>>>> 713d7425ea116c895b47af49e47b9059b1240205
