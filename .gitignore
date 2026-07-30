@@ -1,3 +1,5 @@
+miniproenv/
+dataset/
 .venv/
 
 __pycache__/
@@ -6,3 +8,4 @@ Data/
 *.npy
 *.mp4
 *.png
+
