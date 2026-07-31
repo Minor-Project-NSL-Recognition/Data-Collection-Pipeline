@@ -2,9 +2,7 @@
   "config": {
     "epochs": 200,
     "batch_size": 16,
-    "seq_len": 151,
-    "n_features": 225,
-    "n_params": 191974,
+    "seq_len": 148,
     "seed": 42
   },
   "class_names": [
@@ -13,29 +11,40 @@
     "cant_breathe",
     "help_danger",
     "need_ambulance",
-    "need_toilet"
+    "need_toilet",
+    "none"
   ],
   "signer_independent": {
     "test_signers": [
+      "signer01",
       "signer02",
       "signer03",
       "signer04"
     ],
-    "train_only_signers": [
-      "signer01"
-    ],
+    "train_only_signers": [],
     "fold_accuracy": {
-      "signer02": 1.0,
-      "signer03": 1.0,
-      "signer04": 0.9921259842519685
+      "signer01": 0.9428571428571428,
+      "signer02": 0.9858156028368794,
+      "signer03": 0.9857142857142858,
+      "signer04": 0.959731543624161
     },
-    "mean_accuracy": 0.9973753280839895,
-    "std_accuracy": 0.0037118466204018176,
-    "pooled_accuracy": 0.9972826086956522,
+    "mean_accuracy": 0.9685296437581172,
+    "std_accuracy": 0.018238696286412576,
+    "pooled_accuracy": 0.968421052631579,
     "confusion_matrix": [
       [
-        60,
+        77,
         0,
+        0,
+        0,
+        0,
+        0,
+        3
+      ],
+      [
+        0,
+        79,
+        2,
         0,
         0,
         0,
@@ -43,99 +52,110 @@
       ],
       [
         0,
-        61,
+        2,
+        78,
         0,
         0,
+        0,
+        3
+      ],
+      [
+        0,
+        1,
+        0,
+        79,
+        0,
+        1,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        80,
         0,
         0
       ],
       [
         0,
         0,
-        61,
-        0,
-        0,
-        0
-      ],
-      [
         0,
         0,
         0,
-        61,
-        0,
+        85,
         0
       ],
       [
         1,
         0,
+        3,
         0,
-        0,
-        59,
-        0
-      ],
-      [
-        0,
-        0,
-        0,
-        0,
-        0,
-        65
+        1,
+        1,
+        74
       ]
     ],
     "per_class": {
       "building_on_fire": {
-        "precision": 0.9836065573770492,
-        "recall": 1.0,
-        "f1-score": 0.9917355371900827,
-        "support": 60.0
+        "precision": 0.9871794871794872,
+        "recall": 0.9625,
+        "f1-score": 0.9746835443037974,
+        "support": 80.0
       },
       "call_police": {
-        "precision": 1.0,
-        "recall": 1.0,
-        "f1-score": 1.0,
-        "support": 61.0
+        "precision": 0.9634146341463414,
+        "recall": 0.9753086419753086,
+        "f1-score": 0.9693251533742331,
+        "support": 81.0
       },
       "cant_breathe": {
-        "precision": 1.0,
-        "recall": 1.0,
-        "f1-score": 1.0,
-        "support": 61.0
+        "precision": 0.9397590361445783,
+        "recall": 0.9397590361445783,
+        "f1-score": 0.9397590361445783,
+        "support": 83.0
       },
       "help_danger": {
         "precision": 1.0,
-        "recall": 1.0,
-        "f1-score": 1.0,
-        "support": 61.0
+        "recall": 0.9753086419753086,
+        "f1-score": 0.9875,
+        "support": 81.0
       },
       "need_ambulance": {
-        "precision": 1.0,
-        "recall": 0.9833333333333333,
-        "f1-score": 0.9915966386554622,
-        "support": 60.0
+        "precision": 0.9876543209876543,
+        "recall": 1.0,
+        "f1-score": 0.9937888198757764,
+        "support": 80.0
       },
       "need_toilet": {
-        "precision": 1.0,
+        "precision": 0.9770114942528736,
         "recall": 1.0,
-        "f1-score": 1.0,
-        "support": 65.0
+        "f1-score": 0.9883720930232558,
+        "support": 85.0
       },
-      "accuracy": 0.9972826086956522,
+      "none": {
+        "precision": 0.925,
+        "recall": 0.925,
+        "f1-score": 0.925,
+        "support": 80.0
+      },
+      "accuracy": 0.968421052631579,
       "macro avg": {
-        "precision": 0.9972677595628415,
-        "recall": 0.9972222222222222,
-        "f1-score": 0.9972220293075909,
-        "support": 368.0
+        "precision": 0.9685741389587049,
+        "recall": 0.9682680457278849,
+        "f1-score": 0.9683469495316631,
+        "support": 570.0
       },
       "weighted avg": {
-        "precision": 0.9973271560940842,
-        "recall": 0.9972826086956522,
-        "f1-score": 0.9972824199748171,
-        "support": 368.0
+        "precision": 0.9685425737381038,
+        "recall": 0.968421052631579,
+        "f1-score": 0.9684074639730799,
+        "support": 570.0
       }
     }
   },
   "random_split_baseline": {
-    "test_accuracy": 0.9859154929577465,
-    "n_test": 71
+    "test_accuracy": 0.9767441860465116,
+    "n_test": 86
   }
 }
