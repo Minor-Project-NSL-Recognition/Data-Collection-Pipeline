@@ -3,9 +3,20 @@ import 'dart:async';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'frame_encoder.dart';
 import 'nsl_client.dart';
+
+/// Which lens the user last chose. Front is the default because the signer is
+/// usually alone; back is for when someone else holds the phone.
+const _prefsUseFront = 'camera_use_front';
+
+/// Whether to flip the preview horizontally. Default off: whether a front
+/// preview arrives already mirrored is a platform/device decision, so the only
+/// reliable answer is to let the signer pick the one that reads correctly and
+/// remember it. Display only — never affects the frames sent to the server.
+const _prefsMirrorPreview = 'camera_mirror_preview';
 
 /// Aim slightly above the server's 15.7 fps decimation target so rounding and
 /// jitter don't starve it. Sending faster is harmless (the server drops the
@@ -36,11 +47,16 @@ class _SignPageState extends State<SignPage> with WidgetsBindingObserver {
   final _tts = FlutterTts();
   StreamSubscription<NslAck>? _ackSub;
 
+  List<CameraDescription> _cameras = const [];
+  int _cameraIndex = 0;
+
   bool _initialising = true;
   String? _fatal;
   bool _connected = false;
   bool _recording = false;
   bool _finishing = false;
+  bool _switchingCamera = false;
+  bool _mirrorPreview = false;
 
   // live telemetry
   bool _pose = false;
@@ -64,27 +80,109 @@ class _SignPageState extends State<SignPage> with WidgetsBindingObserver {
     try {
       final cameras = await availableCameras();
       if (cameras.isEmpty) throw Exception('no cameras on this device');
-      final front = cameras.firstWhere(
-        (c) => c.lensDirection == CameraLensDirection.front,
-        orElse: () => cameras.first,
-      );
-      final controller = CameraController(
-        front,
-        ResolutionPreset.medium, // ~640x480; lower hurts hand landmarks
-        enableAudio: false,
-        imageFormatGroup: ImageFormatGroup.yuv420,
-      );
-      await controller.initialize();
+      final prefs = await SharedPreferences.getInstance();
+      final wantFront = prefs.getBool(_prefsUseFront) ?? true;
+      final mirror = prefs.getBool(_prefsMirrorPreview) ?? false;
+
       final encoder = await FrameEncoder.spawn();
       if (!mounted) return;
-      setState(() {
-        _camera = controller;
-        _encoder = encoder;
-        _initialising = false;
-      });
+      _cameras = cameras;
+      _encoder = encoder;
+      _mirrorPreview = mirror;
+      await _openCamera(_indexForLens(
+        wantFront ? CameraLensDirection.front : CameraLensDirection.back,
+      ));
+      if (!mounted) return;
+      setState(() => _initialising = false);
       await _connect();
     } catch (e) {
       if (mounted) setState(() => _fatal = '$e', );
+    }
+  }
+
+  /// First camera with [lens], falling back to whatever the device has.
+  int _indexForLens(CameraLensDirection lens) {
+    final i = _cameras.indexWhere((c) => c.lensDirection == lens);
+    return i < 0 ? 0 : i;
+  }
+
+  /// One camera per lens direction, in a stable order. Phones commonly expose
+  /// several back cameras (wide, ultrawide, macro); cycling through all of them
+  /// would make the switch button feel broken, so only the first of each counts.
+  List<int> get _lensOptions {
+    final seen = <CameraLensDirection>{};
+    final out = <int>[];
+    for (var i = 0; i < _cameras.length; i++) {
+      if (seen.add(_cameras[i].lensDirection)) out.add(i);
+    }
+    return out;
+  }
+
+  bool get _isFront =>
+      _camera?.description.lensDirection == CameraLensDirection.front;
+
+  /// Tears down the current controller and brings up [index]. The encoder
+  /// isolate is deliberately *not* recreated — it is stateless between frames,
+  /// and respawning it would add a needless pause to every switch.
+  Future<void> _openCamera(int index) async {
+    final old = _camera;
+    if (mounted) setState(() => _camera = null);
+    if (old != null) {
+      try {
+        if (old.value.isStreamingImages) await old.stopImageStream();
+      } catch (_) {/* already stopped */}
+      await old.dispose();
+    }
+
+    final controller = CameraController(
+      _cameras[index],
+      ResolutionPreset.medium, // ~640x480; lower hurts hand landmarks
+      enableAudio: false,
+      imageFormatGroup: ImageFormatGroup.yuv420,
+    );
+    await controller.initialize();
+    if (!mounted) {
+      await controller.dispose();
+      return;
+    }
+    setState(() {
+      _camera = controller;
+      _cameraIndex = index;
+    });
+  }
+
+  Future<void> _toggleMirror() async {
+    final next = !_mirrorPreview;
+    setState(() => _mirrorPreview = next);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefsMirrorPreview, next);
+  }
+
+  /// Flip between front and back.
+  ///
+  /// The `mirror` flag sent to the server stays true for BOTH lenses, so no
+  /// reconnect is needed. That is not an oversight: the lens faces the signer
+  /// either way, so a raw frame has the signer's right hand on the image-left
+  /// in both cases. `record.py` mirrored every training clip, and the server
+  /// reproduces that flip. Making the flag depend on the lens would swap the
+  /// left and right hand blocks in the 225-vector for one of them.
+  Future<void> _switchCamera() async {
+    if (_switchingCamera || _recording) return;
+    final options = _lensOptions;
+    if (options.length < 2) return;
+    final pos = options.indexOf(_cameraIndex);
+    final next = options[(pos + 1) % options.length];
+
+    setState(() => _switchingCamera = true);
+    try {
+      await _openCamera(next);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_prefsUseFront,
+          _cameras[next].lensDirection == CameraLensDirection.front);
+    } catch (e) {
+      if (mounted) setState(() => _error = 'Could not switch camera: $e');
+    } finally {
+      if (mounted) setState(() => _switchingCamera = false);
     }
   }
 
@@ -121,7 +219,7 @@ class _SignPageState extends State<SignPage> with WidgetsBindingObserver {
   }
 
   Future<void> _start() async {
-    if (!_connected || _camera == null || _recording) return;
+    if (!_connected || _camera == null || _recording || _switchingCamera) return;
     await _client.reset();
     setState(() {
       _recording = true;
@@ -137,14 +235,17 @@ class _SignPageState extends State<SignPage> with WidgetsBindingObserver {
   }
 
   void _onFrame(CameraImage image) {
-    if (!_recording || _encoder == null) return;
+    final camera = _camera;
+    if (!_recording || _encoder == null || camera == null) return;
     final now = DateTime.now();
     if (now.difference(_lastFrameAt) < _frameInterval) return;
     if (_encoder!.isBusy) return; // still encoding the previous frame
     _lastFrameAt = now;
 
+    // Portrait is locked in main.dart, so sensorOrientation alone is the
+    // correct upright rotation for both lenses.
     _encoder!
-        .encode(image, rotation: _camera!.description.sensorOrientation)
+        .encode(image, rotation: camera.description.sensorOrientation)
         .then((jpeg) {
       if (jpeg == null || !_recording) return;
       _client.sendFrame(jpeg);
@@ -216,6 +317,19 @@ class _SignPageState extends State<SignPage> with WidgetsBindingObserver {
         title: const Text('NSL Recognition'),
         actions: [
           IconButton(
+            tooltip: _mirrorPreview ? 'Preview: mirrored' : 'Preview: as others see you',
+            icon: Icon(_mirrorPreview ? Icons.flip : Icons.flip_outlined),
+            onPressed: _toggleMirror,
+          ),
+          if (_lensOptions.length > 1)
+            IconButton(
+              tooltip: _isFront ? 'Switch to back camera' : 'Switch to front camera',
+              icon: const Icon(Icons.cameraswitch),
+              // Blocked mid-sign: swapping the lens would restart the image
+              // stream underneath a clip the server is still accumulating.
+              onPressed: (_recording || _switchingCamera) ? null : _switchCamera,
+            ),
+          IconButton(
             tooltip: 'Server settings',
             icon: const Icon(Icons.settings),
             onPressed: widget.onEditServer,
@@ -238,14 +352,20 @@ class _SignPageState extends State<SignPage> with WidgetsBindingObserver {
   }
 
   Widget _preview() {
-    final camera = _camera!;
-    // Mirror the *preview only* so signing feels natural. The frames sent to
-    // the server stay unmirrored — the server flips them itself, matching
-    // record.py. Mirroring here as well would flip them back.
-    final isFront = camera.description.lensDirection == CameraLensDirection.front;
+    final camera = _camera;
+    if (camera == null || !camera.value.isInitialized) {
+      return const _CenteredMessage(
+          icon: Icons.cameraswitch, text: 'Switching camera…');
+    }
+    // Preview orientation only, toggled from the app bar and remembered.
+    //
+    // The frames sent to the server are never affected: they go unmirrored on
+    // both lenses and the server flips them itself, matching record.py.
+    // Mirroring the wire frames would flip them back and swap the left/right
+    // hand blocks in the 225-vector.
     return ClipRect(
       child: Transform.scale(
-        scaleX: isFront ? -1 : 1,
+        scaleX: _mirrorPreview ? -1 : 1,
         child: Center(child: CameraPreview(camera)),
       ),
     );
@@ -265,6 +385,7 @@ class _SignPageState extends State<SignPage> with WidgetsBindingObserver {
           _Chip('hands', _hands),
           _Info('frames', '$_kept'),
           if (fps != null) _Info('fps', fps.toStringAsFixed(1)),
+          _Info('lens', _isFront ? 'front' : 'back'),
         ],
       ),
     );

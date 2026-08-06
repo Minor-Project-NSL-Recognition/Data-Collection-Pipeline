@@ -27,6 +27,9 @@ class _NslAppState extends State<NslApp> {
   String? _url;
   String? _apiKey;
   bool _loading = true;
+  // Distinct from `_url == null`. Opening the settings must not throw away the
+  // saved URL — otherwise reopening them means retyping it from scratch.
+  bool _editing = false;
 
   @override
   void initState() {
@@ -49,6 +52,7 @@ class _NslAppState extends State<NslApp> {
       setState(() {
         _url = url;
         _apiKey = apiKey;
+        _editing = false;
       });
     }
   }
@@ -61,16 +65,20 @@ class _NslAppState extends State<NslApp> {
       theme: ThemeData.dark(useMaterial3: true),
       home: _loading
           ? const Scaffold(body: Center(child: CircularProgressIndicator()))
-          : _url == null
+          : (_url == null || _editing)
               ? ServerSetupPage(
-                  initialUrl: _defaultUrl,
+                  // Prefill with what is already stored, so reopening settings
+                  // after a tunnel/IP change is an edit, not a re-entry.
+                  initialUrl: _url ?? _defaultUrl,
                   initialApiKey: _apiKey ?? '',
                   onSaved: _save,
+                  onCancel:
+                      _url == null ? null : () => setState(() => _editing = false),
                 )
               : SignPage(
                   serverUrl: _url!,
                   apiKey: _apiKey,
-                  onEditServer: () => setState(() => _url = null),
+                  onEditServer: () => setState(() => _editing = true),
                 ),
     );
   }
@@ -82,10 +90,14 @@ class ServerSetupPage extends StatefulWidget {
     required this.initialUrl,
     required this.initialApiKey,
     required this.onSaved,
+    this.onCancel,
   });
   final String initialUrl;
   final String initialApiKey;
   final void Function(String url, String apiKey) onSaved;
+
+  /// Null on first launch, when there is nothing to go back to.
+  final VoidCallback? onCancel;
 
   @override
   State<ServerSetupPage> createState() => _ServerSetupPageState();
@@ -160,6 +172,8 @@ class _ServerSetupPageState extends State<ServerSetupPage> {
             ),
             const SizedBox(height: 16),
             FilledButton(onPressed: _submit, child: const Text('Connect')),
+            if (widget.onCancel != null)
+              TextButton(onPressed: widget.onCancel, child: const Text('Cancel')),
           ],
         ),
       ),
