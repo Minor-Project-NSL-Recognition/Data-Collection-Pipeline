@@ -34,16 +34,18 @@ from nslr import config as C
 
 
 def check_health(url):
-    r = requests.get(f"{url}/health", timeout=10)
+    r = requests.get(f"{url}/health", timeout=30)
     r.raise_for_status()
     h = r.json()
     print(f"  backend={h['backend']}  classes={h['n_classes']}  seq_len={h['seq_len']}")
     print(f"  threshold={h['confidence_threshold']}  open_set={h['open_set_rejection']}  "
           f"target_fps={h['target_fps']}")
+    if h.get("auth_required"):
+        print("  auth: required — pass --key")
     return h
 
 
-def test_clips(url, raw_dir, n, seed):
+def test_clips(url, raw_dir, n, seed, key=None):
     paths = sorted(glob.glob(os.path.join(raw_dir, "*", "*.npy")))
     if not paths:
         print(f"  ! no clips under {raw_dir} — skipping")
@@ -59,10 +61,14 @@ def test_clips(url, raw_dir, n, seed):
         truth = os.path.basename(os.path.dirname(path))
         with open(path, "rb") as fh:
             blob = fh.read()
+        headers = {"Content-Type": "application/octet-stream"}
+        if key:
+            headers["X-API-Key"] = key
         t0 = time.perf_counter()
-        r = requests.post(f"{url}/predict/npy", data=blob,
-                          headers={"Content-Type": "application/octet-stream"}, timeout=60)
+        r = requests.post(f"{url}/predict/npy", data=blob, headers=headers, timeout=60)
         latencies.append((time.perf_counter() - t0) * 1000)
+        if r.status_code == 401:
+            raise SystemExit("401 unauthorized — the server needs --key <NSL_API_KEY>")
         if r.status_code != 200:
             print(f"  ! {os.path.basename(path)} -> HTTP {r.status_code}: {r.text[:120]}")
             continue
@@ -108,7 +114,7 @@ def test_clips(url, raw_dir, n, seed):
     return acc
 
 
-def test_stream(url, target_fps):
+def test_stream(url, target_fps, key=None):
     try:
         import websockets  # noqa: F401
     except ImportError:
@@ -123,6 +129,8 @@ def test_stream(url, target_fps):
     import websockets as ws_mod
 
     ws_url = url.replace("http://", "ws://").replace("https://", "wss://") + "/ws/stream"
+    if key:
+        ws_url += f"?key={key}"
     # A synthetic frame detects no landmarks, which is fine: this test is about
     # the protocol and the rate limiter, not about recognition quality.
     frame = np.full((480, 640, 3), 40, np.uint8)
@@ -210,6 +218,8 @@ def main():
     p.add_argument("--n", type=int, default=40, help="clips to replay")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--only", choices=["clips", "stream"], default=None)
+    p.add_argument("--key", default=os.environ.get("NSL_API_KEY") or None,
+                   help="API key if the server sets NSL_API_KEY (defaults to $NSL_API_KEY)")
     a = p.parse_args()
 
     url = a.url.rstrip("/")
@@ -222,10 +232,10 @@ def main():
 
     if a.only != "stream":
         print(f"\n=== replay clips ===")
-        test_clips(url, a.raw, a.n, a.seed)
+        test_clips(url, a.raw, a.n, a.seed, a.key)
     if a.only != "clips":
         print(f"\n=== websocket protocol ===")
-        test_stream(url, health["target_fps"])
+        test_stream(url, health["target_fps"], a.key)
 
 
 if __name__ == "__main__":

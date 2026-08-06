@@ -104,9 +104,17 @@ class NslException implements Exception {
   String toString() => detail == null ? code : '$code: $detail';
 }
 
+/// Cloudflare (and most reverse proxies) close WebSockets that sit idle, and
+/// between signs this one does exactly that. A periodic ping keeps it open;
+/// without it the first sign works and the next one fails with a disconnect
+/// some minutes later — an intermittent failure that is miserable to diagnose
+/// live. Harmless on a LAN.
+const _keepAlivePeriod = Duration(seconds: 30);
+
 class NslClient {
   WebSocketChannel? _channel;
   StreamSubscription? _sub;
+  Timer? _keepAlive;
   final _ackController = StreamController<NslAck>.broadcast();
   Completer<NslResult>? _pending;
   Completer<void>? _ready;
@@ -115,15 +123,29 @@ class NslClient {
   Stream<NslAck> get acks => _ackController.stream;
   bool get isConnected => _channel != null;
 
-  /// [baseUrl] is the plain HTTP origin, e.g. `http://192.168.1.7:8000`.
+  /// [baseUrl] is the HTTP origin — `http://192.168.1.7:8000` on a LAN, or the
+  /// `https://…` tunnel URL. `https` becomes `wss` automatically.
+  ///
+  /// [apiKey] is required when the server runs with `NSL_API_KEY` set, which it
+  /// should whenever it is exposed through a tunnel. It goes in the query
+  /// string rather than a header because WebSocket clients cannot reliably set
+  /// headers on the upgrade request.
   ///
   /// [mirror] must stay true for a front camera: the server flips the frame to
   /// match `record.py`, which mirrored every training clip. Flipping twice puts
   /// the left and right hand blocks in each other's slots.
-  Future<void> connect(String baseUrl, {bool mirror = true, Duration timeout = const Duration(seconds: 10)}) async {
+  Future<void> connect(
+    String baseUrl, {
+    bool mirror = true,
+    String? apiKey,
+    Duration timeout = const Duration(seconds: 15),
+  }) async {
     await dispose();
     final ws = baseUrl.replaceFirst(RegExp(r'^http'), 'ws');
-    final uri = Uri.parse('$ws/ws/stream?mirror=${mirror ? 1 : 0}');
+    final uri = Uri.parse('$ws/ws/stream').replace(queryParameters: {
+      'mirror': mirror ? '1' : '0',
+      if (apiKey != null && apiKey.isNotEmpty) 'key': apiKey,
+    });
 
     final channel = WebSocketChannel.connect(uri);
     _channel = channel;
@@ -138,6 +160,12 @@ class NslClient {
 
     await channel.ready.timeout(timeout);
     await _ready!.future.timeout(timeout);
+
+    _keepAlive = Timer.periodic(_keepAlivePeriod, (_) {
+      if (_channel != null && _pending == null) {
+        _channel!.sink.add(jsonEncode({'type': 'ping'}));
+      }
+    });
   }
 
   void _onMessage(dynamic raw) {
@@ -173,6 +201,8 @@ class NslClient {
   }
 
   void _failAll(Object error) {
+    _keepAlive?.cancel();
+    _keepAlive = null;
     if (_ready?.isCompleted == false) _ready!.completeError(error);
     _pending?.completeError(error);
     _pending = null;
@@ -203,6 +233,8 @@ class NslClient {
   }
 
   Future<void> dispose() async {
+    _keepAlive?.cancel();
+    _keepAlive = null;
     await _sub?.cancel();
     _sub = null;
     await _channel?.sink.close();

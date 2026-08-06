@@ -15,8 +15,14 @@ const _targetFps = 16;
 const _frameInterval = Duration(milliseconds: 1000 ~/ _targetFps);
 
 class SignPage extends StatefulWidget {
-  const SignPage({super.key, required this.serverUrl, required this.onEditServer});
+  const SignPage({
+    super.key,
+    required this.serverUrl,
+    required this.onEditServer,
+    this.apiKey,
+  });
   final String serverUrl;
+  final String? apiKey;
   final VoidCallback onEditServer;
 
   @override
@@ -88,7 +94,7 @@ class _SignPageState extends State<SignPage> with WidgetsBindingObserver {
       _error = null;
     });
     try {
-      await _client.connect(widget.serverUrl);
+      await _client.connect(widget.serverUrl, apiKey: widget.apiKey);
       _ackSub?.cancel();
       _ackSub = _client.acks.listen((ack) {
         if (!mounted) return;
@@ -103,9 +109,12 @@ class _SignPageState extends State<SignPage> with WidgetsBindingObserver {
       if (mounted) setState(() => _connected = true);
     } catch (e) {
       if (mounted) {
+        final unauthorized = '$e'.contains('unauthorized');
         setState(() {
           _connected = false;
-          _error = 'Cannot reach ${widget.serverUrl}\n$e';
+          _error = unauthorized
+              ? 'Server rejected the API key. Check it under the gear icon.'
+              : 'Cannot reach ${widget.serverUrl}\n$e';
         });
       }
     }

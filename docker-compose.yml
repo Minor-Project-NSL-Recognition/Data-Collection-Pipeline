@@ -1,0 +1,67 @@
+# NSL recognition backend, optionally published through a Cloudflare tunnel.
+#
+#   docker compose up -d                      # LAN only, http://<laptop-ip>:8000
+#   docker compose --profile quick up -d      # + a random https://*.trycloudflare.com URL
+#   docker compose --profile named up -d      # + your own stable hostname (needs TUNNEL_TOKEN)
+#
+# Get the quick tunnel's URL with:  ./scripts/tunnel_url.sh
+#
+# Copy .env.example to .env first. Set NSL_API_KEY whenever a tunnel is running:
+# a tunnel URL is public, and without a key anyone who has it can stream frames
+# into your MediaPipe workers.
+
+services:
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    image: nsl-server
+    container_name: nsl-server
+    environment:
+      NSL_MAX_SESSIONS: ${NSL_MAX_SESSIONS:-4}
+      NSL_API_KEY: ${NSL_API_KEY:-}
+    ports:
+      # Also published on the LAN, so the phone can fall back to a direct
+      # connection if the tunnel misbehaves mid-demo.
+      - "8000:8000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+
+  # --- Zero setup, ephemeral URL -------------------------------------------
+  # No Cloudflare account needed. The hostname is random and changes on every
+  # restart, so re-read it (and re-enter it in the app) each time you bring it
+  # up. Good for testing; not what you want on demo day.
+  tunnel-quick:
+    image: cloudflare/cloudflared:latest
+    container_name: nsl-tunnel-quick
+    profiles: ["quick"]
+    command: tunnel --no-autoupdate --url http://server:8000
+    depends_on:
+      server:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # --- Stable hostname ------------------------------------------------------
+  # Needs a Cloudflare account with a domain, and a tunnel created in
+  # Zero Trust > Networks > Tunnels. Point its public hostname at
+  # http://server:8000 (the compose service name, not localhost), then put the
+  # tunnel token in .env. The URL then survives restarts and reboots.
+  tunnel-named:
+    image: cloudflare/cloudflared:latest
+    container_name: nsl-tunnel-named
+    profiles: ["named"]
+    # Plain ${VAR:-} on purpose. Compose interpolates the entire file before it
+    # applies profiles, so a `${TUNNEL_TOKEN:?...}` guard here would break
+    # `docker compose up -d` for everyone who never set up a named tunnel.
+    # Missing token surfaces as a cloudflared login error instead.
+    command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN:-}
+    depends_on:
+      server:
+        condition: service_healthy
+    restart: unless-stopped

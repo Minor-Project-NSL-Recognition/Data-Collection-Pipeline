@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'sign_page.dart';
 
 const _prefsKey = 'server_url';
+const _prefsApiKey = 'api_key';
 const _defaultUrl = 'http://192.168.1.100:8000';
 
 Future<void> main() async {
@@ -24,6 +25,7 @@ class NslApp extends StatefulWidget {
 
 class _NslAppState extends State<NslApp> {
   String? _url;
+  String? _apiKey;
   bool _loading = true;
 
   @override
@@ -33,15 +35,22 @@ class _NslAppState extends State<NslApp> {
       if (!mounted) return;
       setState(() {
         _url = p.getString(_prefsKey);
+        _apiKey = p.getString(_prefsApiKey);
         _loading = false;
       });
     });
   }
 
-  Future<void> _save(String url) async {
+  Future<void> _save(String url, String apiKey) async {
     final p = await SharedPreferences.getInstance();
     await p.setString(_prefsKey, url);
-    if (mounted) setState(() => _url = url);
+    await p.setString(_prefsApiKey, apiKey);
+    if (mounted) {
+      setState(() {
+        _url = url;
+        _apiKey = apiKey;
+      });
+    }
   }
 
   @override
@@ -53,9 +62,14 @@ class _NslAppState extends State<NslApp> {
       home: _loading
           ? const Scaffold(body: Center(child: CircularProgressIndicator()))
           : _url == null
-              ? ServerSetupPage(initial: _defaultUrl, onSaved: _save)
+              ? ServerSetupPage(
+                  initialUrl: _defaultUrl,
+                  initialApiKey: _apiKey ?? '',
+                  onSaved: _save,
+                )
               : SignPage(
                   serverUrl: _url!,
+                  apiKey: _apiKey,
                   onEditServer: () => setState(() => _url = null),
                 ),
     );
@@ -63,16 +77,23 @@ class _NslAppState extends State<NslApp> {
 }
 
 class ServerSetupPage extends StatefulWidget {
-  const ServerSetupPage({super.key, required this.initial, required this.onSaved});
-  final String initial;
-  final ValueChanged<String> onSaved;
+  const ServerSetupPage({
+    super.key,
+    required this.initialUrl,
+    required this.initialApiKey,
+    required this.onSaved,
+  });
+  final String initialUrl;
+  final String initialApiKey;
+  final void Function(String url, String apiKey) onSaved;
 
   @override
   State<ServerSetupPage> createState() => _ServerSetupPageState();
 }
 
 class _ServerSetupPageState extends State<ServerSetupPage> {
-  late final _controller = TextEditingController(text: widget.initial);
+  late final _controller = TextEditingController(text: widget.initialUrl);
+  late final _keyController = TextEditingController(text: widget.initialApiKey);
   String? _error;
 
   void _submit() {
@@ -82,12 +103,16 @@ class _ServerSetupPageState extends State<ServerSetupPage> {
       setState(() => _error = 'Expected something like http://192.168.1.7:8000');
       return;
     }
-    widget.onSaved(text.replaceAll(RegExp(r'/+$'), ''));
+    widget.onSaved(
+      text.replaceAll(RegExp(r'/+$'), ''),
+      _keyController.text.trim(),
+    );
   }
 
   @override
   void dispose() {
     _controller.dispose();
+    _keyController.dispose();
     super.dispose();
   }
 
@@ -100,15 +125,14 @@ class _ServerSetupPageState extends State<ServerSetupPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text(
-              'Enter the address of the recognition server. The phone and the '
-              'server must be on the same Wi-Fi network.',
-            ),
+            const Text('Where is the recognition server?'),
             const SizedBox(height: 8),
             const Text(
-              'Find it with `ipconfig` (Windows) or `hostname -I` (Linux) on the '
-              'machine running the server. Not 127.0.0.1 — on the phone that '
-              'would mean the phone itself.',
+              'Same Wi-Fi:  http://<laptop-ip>:8000 — find it with `ipconfig` '
+              '(Windows) or `hostname -I` (Linux). Not 127.0.0.1; on the phone '
+              'that would mean the phone itself.\n\n'
+              'Cloudflare tunnel:  the https://… URL. Then the phone does not '
+              'need to be on the same network at all.',
               style: TextStyle(fontSize: 12, color: Colors.white54),
             ),
             const SizedBox(height: 20),
@@ -120,6 +144,17 @@ class _ServerSetupPageState extends State<ServerSetupPage> {
                 labelText: 'Server URL',
                 border: const OutlineInputBorder(),
                 errorText: _error,
+              ),
+              onSubmitted: (_) => _submit(),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _keyController,
+              autocorrect: false,
+              decoration: const InputDecoration(
+                labelText: 'API key (optional)',
+                helperText: 'Required only if the server sets NSL_API_KEY',
+                border: OutlineInputBorder(),
               ),
               onSubmitted: (_) => _submit(),
             ),

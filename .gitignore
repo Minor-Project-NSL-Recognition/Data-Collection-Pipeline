@@ -14,3 +14,6 @@ Data/
 # MediaPipe Tasks model bundles (~17 MB, re-downloadable) and TFLite exports
 models/tasks/*.task
 *.tflite
+
+# Secrets: API key + Cloudflare tunnel token. .env.example is the committed one.
+.env

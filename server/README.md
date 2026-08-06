@@ -96,12 +96,28 @@ Anything below ~95% means `server/inference.py` diverged from `nslr/`.
 ### Docker
 
 ```bash
-docker build -f server/Dockerfile -t nsl-server .    # from the repo root
-docker run --rm -p 8000:8000 nsl-server
+cp .env.example .env                  # from the repo root
+docker compose up -d                  # LAN only
+docker compose --profile quick up -d  # + a random https://*.trycloudflare.com URL
+docker compose --profile named up -d  # + your own stable hostname
+./scripts/tunnel_url.sh               # print the quick tunnel's URL
 ```
 
 The image skips TensorFlow entirely (`tflite-runtime` + the 882 KB export),
-which is the difference between a ~1 GB image and a ~3 GB one.
+which is the difference between a ~1 GB image and a ~3 GB one. Full runbook in
+[../DEMO.md](../DEMO.md).
+
+## Authentication
+
+Setting `NSL_API_KEY` requires that key on every endpoint except `/health`
+(left open so container healthchecks and the phone's reachability test keep
+working). Unset, the API is open — fine on a LAN, **not** fine behind a tunnel,
+where anyone with the URL can stream frames into your MediaPipe workers.
+
+Supply it as an `X-API-Key` header or a `?key=` query parameter. Both work; the
+query form exists because WebSocket clients cannot reliably set headers on the
+upgrade request, and the app uses it for that reason. Compared with
+`hmac.compare_digest`.
 
 ## Deployment notes
 
