@@ -14,7 +14,7 @@ path identical to the validated offline pipeline. See `../server/README.md`.
 | `lib/main.dart` | app shell + server-URL setup screen |
 | `lib/nsl_client.dart` | the `WS /ws/stream` protocol |
 | `lib/frame_encoder.dart` | camera frame → upright JPEG, on a background isolate |
-| `lib/sign_page.dart` | camera preview, hold-to-sign, telemetry, TTS |
+| `lib/sign_page.dart` | camera preview, tap-to-sign, telemetry, TTS |
 
 ## Run it
 
@@ -35,10 +35,31 @@ flutter run -d <device-id>
 
 On first launch the app asks for the server URL. Enter `http://<laptop-ip>:8000`
 — **not** `127.0.0.1`, which on the phone means the phone. Change it later via
-the gear icon.
+the gear icon; both fields have a **paste** button, which is what you want for a
+Cloudflare quick tunnel's random hostname.
 
-Then hold the button, perform one sign, release. The result appears and is
-spoken if it was accepted.
+### Compiling the server in
+
+To skip the setup screen entirely, bake the URL and key into the build:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File ..\scripts\build_app.ps1 -Install
+```
+
+That reads `TUNNEL_HOSTNAME` and `NSL_API_KEY` from `../.env` and passes them as
+`--dart-define=NSL_SERVER_URL` / `NSL_API_KEY` (see the top of `lib/main.dart`).
+Pass `-Url http://192.168.1.15:8000` to override for one build.
+
+A URL saved from the gear icon **wins** over the compiled-in one — it is a
+deliberate override. **Use built-in server** on the setup screen restores the
+compiled-in value; reinstalling also clears the saved one.
+
+Prefer this for anything you actually demo: it defaults to `--release`, and the
+frame encoder is pure Dart, so AOT compilation directly raises the `fps` chip.
+
+Then tap the button, perform one sign, and tap again to stop. The result appears
+and is spoken if it was accepted. It is a toggle rather than hold-to-record
+because signing needs both hands.
 
 ## Reading the telemetry row
 

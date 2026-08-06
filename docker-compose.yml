@@ -20,6 +20,8 @@ services:
     environment:
       NSL_MAX_SESSIONS: ${NSL_MAX_SESSIONS:-4}
       NSL_API_KEY: ${NSL_API_KEY:-}
+      # Empty = the threshold fitted at training time. See .env.example.
+      NSL_OOD_THRESHOLD: ${NSL_OOD_THRESHOLD:-}
     ports:
       # Also published on the LAN, so the phone can fall back to a direct
       # connection if the tunnel misbehaves mid-demo.

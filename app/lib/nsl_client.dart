@@ -116,11 +116,18 @@ class NslClient {
   StreamSubscription? _sub;
   Timer? _keepAlive;
   final _ackController = StreamController<NslAck>.broadcast();
+  final _closedController = StreamController<NslException>.broadcast();
   Completer<NslResult>? _pending;
   Completer<void>? _ready;
   Completer<void>? _resetDone;
 
   Stream<NslAck> get acks => _ackController.stream;
+
+  /// Fires when the socket drops. Without this the UI only finds out by
+  /// timing out a request, so a connection that died while idle costs the
+  /// user a 5 s reset plus a 20 s finish before anything is shown.
+  Stream<NslException> get disconnects => _closedController.stream;
+
   bool get isConnected => _channel != null;
 
   /// [baseUrl] is the HTTP origin — `http://192.168.1.7:8000` on a LAN, or the
@@ -200,36 +207,70 @@ class NslClient {
     }
   }
 
-  void _failAll(Object error) {
+  void _failAll(NslException error) {
     _keepAlive?.cancel();
     _keepAlive = null;
     if (_ready?.isCompleted == false) _ready!.completeError(error);
-    _pending?.completeError(error);
+    if (_pending?.isCompleted == false) _pending!.completeError(error);
     _pending = null;
-    _resetDone?.complete();
+    if (_resetDone?.isCompleted == false) _resetDone!.complete();
     _resetDone = null;
+    if (_closedController.hasListener) _closedController.add(error);
   }
 
   /// Fire-and-forget: acks arrive on [acks]. Deliberately not awaited — waiting
   /// for each ack would pace the camera at the network round-trip instead of
   /// the capture rate.
-  void sendFrame(Uint8List jpeg) => _channel?.sink.add(jpeg);
+  ///
+  /// A socket that dies mid-clip would otherwise throw once per frame, ~16
+  /// times a second, from a callback with nowhere to report. Dropping the frame
+  /// is right: [finish] still reports the real failure, and [disconnects] has
+  /// already fired.
+  void sendFrame(Uint8List jpeg) {
+    try {
+      _channel?.sink.add(jpeg);
+    } catch (_) {/* connection is going away; finish() will surface it */}
+  }
 
   Future<NslResult> finish({Duration timeout = const Duration(seconds: 20)}) {
-    if (_channel == null) return Future.error(NslException('not_connected'));
-    _pending = Completer<NslResult>();
-    _channel!.sink.add(jsonEncode({'type': 'done'}));
-    return _pending!.future.timeout(timeout, onTimeout: () {
+    final channel = _channel;
+    if (channel == null) return Future.error(NslException('not_connected'));
+    // Never drop a live completer on the floor: whoever is awaiting it would
+    // wait out its full timeout for a reply that is now addressed to us.
+    if (_pending?.isCompleted == false) {
+      _pending!.completeError(NslException('superseded'));
+    }
+    final pending = Completer<NslResult>();
+    _pending = pending;
+    try {
+      channel.sink.add(jsonEncode({'type': 'done'}));
+    } catch (e) {
+      // Adding to a closed sink throws synchronously, which would otherwise
+      // escape as an unhandled error rather than a failed request.
       _pending = null;
+      return Future.error(NslException('socket_error', '$e'));
+    }
+    return pending.future.timeout(timeout, onTimeout: () {
+      if (identical(_pending, pending)) _pending = null;
       throw NslException('timeout', 'no result within ${timeout.inSeconds}s');
     });
   }
 
   Future<void> reset({Duration timeout = const Duration(seconds: 5)}) {
-    if (_channel == null) return Future.value();
-    _resetDone = Completer<void>();
-    _channel!.sink.add(jsonEncode({'type': 'reset'}));
-    return _resetDone!.future.timeout(timeout, onTimeout: () {});
+    final channel = _channel;
+    if (channel == null) return Future.value();
+    if (_resetDone?.isCompleted == false) _resetDone!.complete();
+    final done = Completer<void>();
+    _resetDone = done;
+    try {
+      channel.sink.add(jsonEncode({'type': 'reset'}));
+    } catch (e) {
+      _resetDone = null;
+      return Future.error(NslException('socket_error', '$e'));
+    }
+    return done.future.timeout(timeout, onTimeout: () {
+      if (identical(_resetDone, done)) _resetDone = null;
+    });
   }
 
   Future<void> dispose() async {
