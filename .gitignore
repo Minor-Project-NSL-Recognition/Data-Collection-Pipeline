@@ -10,3 +10,7 @@ Data/
 *.png
 *.keras
 .recorder_config.json
+
+# MediaPipe Tasks model bundles (~17 MB, re-downloadable) and TFLite exports
+models/tasks/*.task
+*.tflite
