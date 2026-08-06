@@ -90,8 +90,11 @@ def _warmup():
     doesn't pay for lazy initialisation."""
     p = predictor()
     p.predict(np.zeros((10, C.FEATURE_DIM), dtype=np.float32))
+    ood_desc = "off"
+    if p.ood:
+        ood_desc = f"d>{p.ood[2]:.2f} ({p.ood_threshold_source})"
     print(f"ready — backend={p.backend} classes={p.class_names} seq_len={p.seq_len} "
-          f"ood={'on' if p.ood else 'off'} max_sessions={MAX_SESSIONS} "
+          f"ood={ood_desc} max_sessions={MAX_SESSIONS} "
           f"auth={'on' if API_KEY else 'OFF (open)'}")
 
 
@@ -103,6 +106,8 @@ def health():
     return {"status": "ok", "backend": p.backend, "n_classes": p.n_classes,
             "seq_len": p.seq_len, "confidence_threshold": p.threshold,
             "open_set_rejection": p.ood is not None,
+            "ood_threshold": p.ood[2] if p.ood else None,
+            "ood_threshold_source": p.ood_threshold_source,
             "target_fps": C.TRAIN_CAPTURE_FPS, "max_sessions": MAX_SESSIONS,
             "auth_required": bool(API_KEY)}
 

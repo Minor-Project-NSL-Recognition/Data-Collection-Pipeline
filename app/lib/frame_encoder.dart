@@ -7,13 +7,24 @@ import 'package:image/image.dart' as img;
 
 /// Converts camera frames to upright JPEGs on a background isolate.
 ///
-/// This is the client's bottleneck, not the network. Colour conversion plus
-/// JPEG encoding of a 640x480 frame costs roughly 50-120 ms in pure Dart, so
-/// doing it on the UI isolate would freeze the preview. A *persistent* isolate
-/// matters too: `compute()` spawns a fresh one per call, and at ~16 fps that
-/// overhead dominates the work itself.
+/// This is the client's bottleneck, not the network, and JPEG encoding in pure
+/// Dart is most of it. Everything here exists to keep the pixel count fed to
+/// [img.encodeJpg] as small as it can be without hurting hand landmarks:
 ///
-/// Backpressure is deliberate — [encode] returns null while a frame is already
+///  * Rotation and downscaling are folded into the colour-conversion loop, so
+///    there is one pass over the OUTPUT pixels and no intermediate full-size
+///    buffers. The previous version converted the full frame, rotated it with
+///    `copyRotate`, then resized -- three allocations and three passes, the
+///    first two at full resolution.
+///  * Sampling is nearest-neighbour, so a 720p source costs the same as a 480p
+///    one once we are downscaling. Only [maxWidth] drives the cost.
+///  * Integer fixed-point YUV maths, because the per-pixel `toInt()` on doubles
+///    was measurable at this call count.
+///
+/// A *persistent* isolate matters too: `compute()` spawns a fresh one per call,
+/// and at ~16 fps that overhead dominates the work itself.
+///
+/// Backpressure is deliberate -- [encode] returns null while a frame is already
 /// in flight rather than queueing. Dropping frames is correct here: the server
 /// decimates to ~15.7 fps anyway, and a queue would only add latency.
 class FrameEncoder {
@@ -22,7 +33,7 @@ class FrameEncoder {
   final Isolate _isolate;
   final SendPort _toIsolate;
   final ReceivePort _fromIsolate;
-  Completer<Uint8List?>? _inFlight;
+  Completer<EncodedFrame?>? _inFlight;
 
   bool get isBusy => _inFlight != null;
 
@@ -37,7 +48,7 @@ class FrameEncoder {
       if (msg is SendPort) {
         ready.complete(msg);
       } else {
-        self?._inFlight?.complete(msg as Uint8List?);
+        self?._inFlight?.complete(msg as EncodedFrame?);
         self?._inFlight = null;
       }
     });
@@ -55,17 +66,18 @@ class FrameEncoder {
   /// rotate them or MediaPipe sees a person lying on their side and detects
   /// no pose at all.
   ///
-  /// [maxWidth] downscales before encoding. It is the main performance lever,
-  /// but lowering it shrinks the hands in frame, which is where landmark
-  /// quality degrades first — prefer 480 or above.
-  Future<Uint8List?> encode(
+  /// [maxWidth] caps the width of the *upright* frame -- the short side, since
+  /// the result is portrait. It is the one performance lever that matters:
+  /// encoding cost is roughly linear in output pixels. Lowering it shrinks the
+  /// hands in frame, which is where landmark quality degrades first.
+  Future<EncodedFrame?> encode(
     CameraImage image, {
     required int rotation,
-    int quality = 75,
-    int maxWidth = 640,
+    int quality = 65,
+    int maxWidth = 320,
   }) {
     if (_inFlight != null) return Future.value(null); // drop, don't queue
-    final completer = Completer<Uint8List?>();
+    final completer = Completer<EncodedFrame?>();
     _inFlight = completer;
     _toIsolate.send(_Job(
       width: image.width,
@@ -86,6 +98,26 @@ class FrameEncoder {
     _fromIsolate.close();
     _isolate.kill(priority: Isolate.immediate);
   }
+}
+
+/// The JPEG plus what it cost, so the UI can show where the frame budget went
+/// instead of leaving a slow device as a mystery.
+class EncodedFrame {
+  EncodedFrame({
+    required this.bytes,
+    required this.millis,
+    required this.srcWidth,
+    required this.srcHeight,
+    required this.outWidth,
+    required this.outHeight,
+  });
+
+  final Uint8List bytes;
+  final int millis;
+  final int srcWidth;
+  final int srcHeight;
+  final int outWidth;
+  final int outHeight;
 }
 
 class _Plane {
@@ -127,23 +159,53 @@ void _entry(SendPort toMain) {
   });
 }
 
-Uint8List? _convert(_Job job) {
+EncodedFrame? _convert(_Job job) {
+  final started = DateTime.now();
   final w = job.width, h = job.height;
-  // Fill a flat RGB buffer and hand it to `Image.fromBytes` in one go.
-  // Per-pixel setPixelRgb() on an Image is several times slower.
-  final rgb = Uint8List(w * h * 3);
+
+  final rot = ((job.rotation % 360) + 360) % 360;
+  final swap = rot == 90 || rot == 270;
+
+  // Dimensions once upright, before any downscale.
+  final rw = swap ? h : w;
+  final rh = swap ? w : h;
+
+  var outW = rw, outH = rh;
+  if (job.maxWidth > 0 && rw > job.maxWidth) {
+    outW = job.maxWidth;
+    outH = (rh * job.maxWidth / rw).round();
+  }
+  if (outW < 1 || outH < 1) return null;
+
+  final rgb = Uint8List(outW * outH * 3);
+  var di = 0;
 
   if (job.format == 'bgra') {
     final src = job.planes[0].bytes;
     final stride = job.planes[0].bytesPerRow;
-    for (var y = 0; y < h; y++) {
-      var si = y * stride;
-      var di = y * w * 3;
-      for (var x = 0; x < w; x++) {
+    for (var oy = 0; oy < outH; oy++) {
+      final ry = oy * rh ~/ outH;
+      for (var ox = 0; ox < outW; ox++) {
+        final rx = ox * rw ~/ outW;
+        final int sx, sy;
+        switch (rot) {
+          case 90:
+            sx = ry;
+            sy = h - 1 - rx;
+          case 180:
+            sx = w - 1 - rx;
+            sy = h - 1 - ry;
+          case 270:
+            sx = w - 1 - ry;
+            sy = rx;
+          default:
+            sx = rx;
+            sy = ry;
+        }
+        final si = sy * stride + sx * 4;
         rgb[di] = src[si + 2]; // R
         rgb[di + 1] = src[si + 1]; // G
         rgb[di + 2] = src[si]; // B
-        si += 4;
         di += 3;
       }
     }
@@ -154,39 +216,65 @@ Uint8List? _convert(_Job job) {
     final uvStride = uP.bytesPerRow;
     final uvPixel = uP.bytesPerPixel;
 
-    for (var y = 0; y < h; y++) {
-      final yRow = y * yStride;
-      final uvRow = (y >> 1) * uvStride;
-      var di = y * w * 3;
-      for (var x = 0; x < w; x++) {
-        final uvIdx = uvRow + (x >> 1) * uvPixel;
-        final yv = yB[yRow + x];
+    for (var oy = 0; oy < outH; oy++) {
+      final ry = oy * rh ~/ outH;
+      for (var ox = 0; ox < outW; ox++) {
+        final rx = ox * rw ~/ outW;
+        final int sx, sy;
+        switch (rot) {
+          case 90:
+            sx = ry;
+            sy = h - 1 - rx;
+          case 180:
+            sx = w - 1 - rx;
+            sy = h - 1 - ry;
+          case 270:
+            sx = w - 1 - ry;
+            sy = rx;
+          default:
+            sx = rx;
+            sy = ry;
+        }
+
+        final uvIdx = (sy >> 1) * uvStride + (sx >> 1) * uvPixel;
+        final yv = yB[yStride * sy + sx];
         final u = uB[uvIdx] - 128;
         final v = vB[uvIdx] - 128;
-        // BT.601 full-range, matching what cv2.cvtColor produces server-side.
-        var r = yv + 1.370705 * v;
-        var g = yv - 0.337633 * u - 0.698001 * v;
-        var b = yv + 1.732446 * u;
-        rgb[di] = r < 0 ? 0 : (r > 255 ? 255 : r.toInt());
-        rgb[di + 1] = g < 0 ? 0 : (g > 255 ? 255 : g.toInt());
-        rgb[di + 2] = b < 0 ? 0 : (b > 255 ? 255 : b.toInt());
+        // BT.601 full-range in 10-bit fixed point, matching cv2.cvtColor
+        // server-side to within a rounding step.
+        final r = (yv * 1024 + 1403 * v) >> 10;
+        final g = (yv * 1024 - 346 * u - 715 * v) >> 10;
+        final b = (yv * 1024 + 1774 * u) >> 10;
+        rgb[di] = r < 0 ? 0 : (r > 255 ? 255 : r);
+        rgb[di + 1] = g < 0 ? 0 : (g > 255 ? 255 : g);
+        rgb[di + 2] = b < 0 ? 0 : (b > 255 ? 255 : b);
         di += 3;
       }
     }
   }
 
-  var frame = img.Image.fromBytes(
-    width: w,
-    height: h,
+  final frame = img.Image.fromBytes(
+    width: outW,
+    height: outH,
     bytes: rgb.buffer,
     numChannels: 3,
   );
+  // 4:2:0 quarters the chroma the encoder has to transform and entropy-code.
+  // The package default is 4:4:4, which is unusual for photographic JPEG and
+  // was costing ~a third of the encode for detail MediaPipe does not use --
+  // landmarks come from luma structure, not chroma resolution.
+  final jpeg = img.encodeJpg(
+    frame,
+    quality: job.quality,
+    chroma: img.JpegChroma.yuv420,
+  );
 
-  if (job.rotation % 360 != 0) {
-    frame = img.copyRotate(frame, angle: job.rotation);
-  }
-  if (frame.width > job.maxWidth) {
-    frame = img.copyResize(frame, width: job.maxWidth);
-  }
-  return img.encodeJpg(frame, quality: job.quality);
+  return EncodedFrame(
+    bytes: jpeg,
+    millis: DateTime.now().difference(started).inMilliseconds,
+    srcWidth: w,
+    srcHeight: h,
+    outWidth: outW,
+    outHeight: outH,
+  );
 }

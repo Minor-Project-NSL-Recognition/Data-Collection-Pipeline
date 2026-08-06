@@ -6,7 +6,21 @@ import 'sign_page.dart';
 
 const _prefsKey = 'server_url';
 const _prefsApiKey = 'api_key';
-const _defaultUrl = 'http://192.168.1.100:8000';
+
+/// Baked in at build time, so a freshly installed APK connects with no setup:
+///
+///     flutter build apk --release \
+///       --dart-define=NSL_SERVER_URL=https://nsl.example.com \
+///       --dart-define=NSL_API_KEY=...
+///
+/// Use with a *named* tunnel, whose hostname survives restarts. A quick tunnel's
+/// URL is regenerated every time, so baking one in would go stale immediately.
+/// Empty (the default) falls back to the manual setup screen.
+const _bakedUrl = String.fromEnvironment('NSL_SERVER_URL');
+const _bakedApiKey = String.fromEnvironment('NSL_API_KEY');
+
+/// Only ever a placeholder in the setup field — never used to connect.
+const _placeholderUrl = 'http://192.168.1.100:8000';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -37,8 +51,12 @@ class _NslAppState extends State<NslApp> {
     SharedPreferences.getInstance().then((p) {
       if (!mounted) return;
       setState(() {
-        _url = p.getString(_prefsKey);
-        _apiKey = p.getString(_prefsApiKey);
+        // A URL saved from the gear icon wins: it is a deliberate override, and
+        // silently replacing it on the next build would be baffling. Reinstall
+        // (or Clear storage) to fall back to the built-in one.
+        _url = p.getString(_prefsKey) ?? (_bakedUrl.isEmpty ? null : _bakedUrl);
+        _apiKey =
+            p.getString(_prefsApiKey) ?? (_bakedApiKey.isEmpty ? null : _bakedApiKey);
         _loading = false;
       });
     });
@@ -69,7 +87,7 @@ class _NslAppState extends State<NslApp> {
               ? ServerSetupPage(
                   // Prefill with what is already stored, so reopening settings
                   // after a tunnel/IP change is an edit, not a re-entry.
-                  initialUrl: _url ?? _defaultUrl,
+                  initialUrl: _url ?? _placeholderUrl,
                   initialApiKey: _apiKey ?? '',
                   onSaved: _save,
                   onCancel:
@@ -121,6 +139,24 @@ class _ServerSetupPageState extends State<ServerSetupPage> {
     );
   }
 
+  /// A quick tunnel's hostname is 40-odd random characters that changes on every
+  /// restart. Typing that on a phone is the worst part of the whole workflow, so
+  /// send it to the phone however you like and paste it here.
+  Future<void> _paste(TextEditingController target) async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text?.trim();
+    if (text == null || text.isEmpty) return;
+    target.text = text;
+    if (mounted) setState(() => _error = null);
+  }
+
+  /// Back to whatever was compiled in with --dart-define, without a reinstall.
+  void _useBuiltIn() {
+    _controller.text = _bakedUrl;
+    _keyController.text = _bakedApiKey;
+    setState(() => _error = null);
+  }
+
   @override
   void dispose() {
     _controller.dispose();
@@ -144,7 +180,9 @@ class _ServerSetupPageState extends State<ServerSetupPage> {
               '(Windows) or `hostname -I` (Linux). Not 127.0.0.1; on the phone '
               'that would mean the phone itself.\n\n'
               'Cloudflare tunnel:  the https://… URL. Then the phone does not '
-              'need to be on the same network at all.',
+              'need to be on the same network at all. A quick tunnel gets a new '
+              'URL every restart — send it to the phone and use the paste '
+              'button rather than typing it.',
               style: TextStyle(fontSize: 12, color: Colors.white54),
             ),
             const SizedBox(height: 20),
@@ -156,6 +194,11 @@ class _ServerSetupPageState extends State<ServerSetupPage> {
                 labelText: 'Server URL',
                 border: const OutlineInputBorder(),
                 errorText: _error,
+                suffixIcon: IconButton(
+                  tooltip: 'Paste',
+                  icon: const Icon(Icons.content_paste),
+                  onPressed: () => _paste(_controller),
+                ),
               ),
               onSubmitted: (_) => _submit(),
             ),
@@ -163,15 +206,25 @@ class _ServerSetupPageState extends State<ServerSetupPage> {
             TextField(
               controller: _keyController,
               autocorrect: false,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: 'API key (optional)',
                 helperText: 'Required only if the server sets NSL_API_KEY',
-                border: OutlineInputBorder(),
+                border: const OutlineInputBorder(),
+                suffixIcon: IconButton(
+                  tooltip: 'Paste',
+                  icon: const Icon(Icons.content_paste),
+                  onPressed: () => _paste(_keyController),
+                ),
               ),
               onSubmitted: (_) => _submit(),
             ),
             const SizedBox(height: 16),
             FilledButton(onPressed: _submit, child: const Text('Connect')),
+            if (_bakedUrl.isNotEmpty)
+              TextButton(
+                onPressed: _useBuiltIn,
+                child: const Text('Use built-in server'),
+              ),
             if (widget.onCancel != null)
               TextButton(onPressed: widget.onCancel, child: const Text('Cancel')),
           ],

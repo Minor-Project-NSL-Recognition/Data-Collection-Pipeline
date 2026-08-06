@@ -46,6 +46,7 @@ class _SignPageState extends State<SignPage> with WidgetsBindingObserver {
   final _client = NslClient();
   final _tts = FlutterTts();
   StreamSubscription<NslAck>? _ackSub;
+  StreamSubscription<NslException>? _closedSub;
 
   List<CameraDescription> _cameras = const [];
   int _cameraIndex = 0;
@@ -58,6 +59,15 @@ class _SignPageState extends State<SignPage> with WidgetsBindingObserver {
   bool _switchingCamera = false;
   bool _mirrorPreview = false;
 
+  /// True while [_start] or [_stop] is mid-flight.
+  ///
+  /// The button is a toggle, and both handlers await before the state that
+  /// would stop a second tap is visible. Without this, a tap landing inside
+  /// that window re-enters against half-built state: two `reset()` calls (the
+  /// second orphans the first's completer, which then hangs its full timeout)
+  /// and two `startImageStream()` calls (the second throws).
+  bool _busy = false;
+
   // live telemetry
   bool _pose = false;
   bool _hands = false;
@@ -65,6 +75,11 @@ class _SignPageState extends State<SignPage> with WidgetsBindingObserver {
   int _sent = 0;
   DateTime? _startedAt;
   DateTime _lastFrameAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  // Where the frame budget actually goes. Without these a slow client is
+  // indistinguishable from a slow network or a slow server.
+  int _encodeMs = 0;
+  String? _sizeLabel;
 
   NslResult? _result;
   String? _error;
@@ -193,6 +208,13 @@ class _SignPageState extends State<SignPage> with WidgetsBindingObserver {
     });
     try {
       await _client.connect(widget.serverUrl, apiKey: widget.apiKey);
+      _closedSub?.cancel();
+      _closedSub = _client.disconnects.listen((e) {
+        if (!mounted) return;
+        // Surface it the moment it happens. Tapping the `server` chip
+        // reconnects, and _stop() also reconnects if a request fails.
+        setState(() => _connected = false);
+      });
       _ackSub?.cancel();
       _ackSub = _client.acks.listen((ack) {
         if (!mounted) return;
@@ -219,19 +241,33 @@ class _SignPageState extends State<SignPage> with WidgetsBindingObserver {
   }
 
   Future<void> _start() async {
-    if (!_connected || _camera == null || _recording || _switchingCamera) return;
-    await _client.reset();
+    if (!_connected || _camera == null || _recording || _busy || _switchingCamera) {
+      return;
+    }
     setState(() {
-      _recording = true;
+      _busy = true;
       _result = null;
       _error = null;
       _pose = false;
       _hands = false;
       _kept = 0;
       _sent = 0;
-      _startedAt = DateTime.now();
     });
-    await _camera!.startImageStream(_onFrame);
+    try {
+      await _client.reset();
+      await _camera!.startImageStream(_onFrame);
+      if (!mounted) return;
+      // Only now is the clip really running, so this is where the fps clock
+      // starts and where _onFrame begins forwarding.
+      setState(() {
+        _recording = true;
+        _startedAt = DateTime.now();
+      });
+    } catch (e) {
+      if (mounted) setState(() => _error = 'Could not start: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   void _onFrame(CameraImage image) {
@@ -246,30 +282,33 @@ class _SignPageState extends State<SignPage> with WidgetsBindingObserver {
     // correct upright rotation for both lenses.
     _encoder!
         .encode(image, rotation: camera.description.sensorOrientation)
-        .then((jpeg) {
-      if (jpeg == null || !_recording) return;
-      _client.sendFrame(jpeg);
+        .then((frame) {
+      if (frame == null || !_recording) return;
+      _client.sendFrame(frame.bytes);
       _sent++;
-    });
+      _encodeMs = frame.millis;
+      _sizeLabel = '${frame.srcWidth}x${frame.srcHeight}'
+          '>${frame.outWidth}x${frame.outHeight}';
+      // A failed encode must not become an unhandled async error: this runs
+      // ~16x/second, so one bad frame would otherwise flood the log mid-sign.
+    }).catchError((_) {});
   }
 
   Future<void> _stop() async {
-    if (!_recording) return;
+    if (!_recording || _busy) return;
     setState(() {
       _recording = false;
+      _busy = true;
       _finishing = true;
     });
     try {
-      await _camera?.stopImageStream();
-    } catch (_) {/* already stopped */}
+      try {
+        await _camera?.stopImageStream();
+      } catch (_) {/* already stopped */}
 
-    try {
       final result = await _client.finish();
       if (!mounted) return;
-      setState(() {
-        _result = result;
-        _finishing = false;
-      });
+      setState(() => _result = result);
       // Speak ONLY on `accepted`. The softmax is closed-world and names a
       // phrase for anything; `unknown` is the open-set gate rejecting it.
       if (result.isAccepted) {
@@ -277,13 +316,25 @@ class _SignPageState extends State<SignPage> with WidgetsBindingObserver {
         await _tts.speak(result.display ?? result.bestGuess);
       }
     } on NslException catch (e) {
+      if (mounted) setState(() => _error = e.toString());
+      // A timeout means the socket is wedged even though it looks open, so
+      // rebuild it rather than leaving the next sign to fail the same way.
+      if (e.code == 'disconnected' ||
+          e.code == 'socket_error' ||
+          e.code == 'timeout') {
+        _connect();
+      }
+    } catch (e) {
+      // Anything else (a closed sink throwing StateError, a TTS failure) must
+      // still land in `finally`, or the button stays disabled for good.
+      if (mounted) setState(() => _error = 'Recognition failed: $e');
+    } finally {
       if (mounted) {
         setState(() {
           _finishing = false;
-          _error = e.toString();
+          _busy = false;
         });
       }
-      if (e.code == 'disconnected' || e.code == 'socket_error') _connect();
     }
   }
 
@@ -302,6 +353,7 @@ class _SignPageState extends State<SignPage> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _ackSub?.cancel();
+    _closedSub?.cancel();
     _client.dispose();
     _camera?.dispose();
     _encoder?.dispose();
@@ -385,6 +437,10 @@ class _SignPageState extends State<SignPage> with WidgetsBindingObserver {
           _Chip('hands', _hands),
           _Info('frames', '$_kept'),
           if (fps != null) _Info('fps', fps.toStringAsFixed(1)),
+          // enc is the whole client-side cost of one frame. If it is near the
+          // 62 ms budget, the phone is the limit and maxWidth is the lever.
+          if (_encodeMs > 0) _Info('enc', '${_encodeMs}ms'),
+          if (_sizeLabel != null) _Info('src', _sizeLabel!),
           _Info('lens', _isFront ? 'front' : 'back'),
         ],
       ),
@@ -403,7 +459,7 @@ class _SignPageState extends State<SignPage> with WidgetsBindingObserver {
       return const _Banner(
         color: Colors.black54,
         title: 'Ready',
-        body: 'Hold the button and perform one sign.',
+        body: 'Tap the button, perform one sign, then tap again.',
       );
     }
     final (color, title) = switch (r.status) {
@@ -423,13 +479,13 @@ class _SignPageState extends State<SignPage> with WidgetsBindingObserver {
   }
 
   Widget _controls() {
-    final enabled = _connected && !_finishing;
+    final enabled = _connected && !_finishing && !_busy;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
       child: GestureDetector(
-        onTapDown: enabled ? (_) => _start() : null,
-        onTapUp: enabled ? (_) => _stop() : null,
-        onTapCancel: enabled ? _stop : null,
+        // Tap to start, tap again to stop — not hold-to-record. Signing needs
+        // both hands, so the signer cannot keep a finger on the button.
+        onTap: enabled ? (_recording ? _stop : _start) : null,
         child: Container(
           height: 72,
           decoration: BoxDecoration(
@@ -442,11 +498,17 @@ class _SignPageState extends State<SignPage> with WidgetsBindingObserver {
           ),
           child: Center(
             child: Text(
+              // The transient states are named rather than left as a greyed
+              // "Tap to sign", which reads as the app having ignored the tap.
               !_connected
                   ? 'No server'
-                  : _recording
-                      ? 'Signing…  release to recognise'
-                      : 'Hold to sign',
+                  : _finishing
+                      ? 'Recognising…'
+                      : _recording
+                          ? 'Signing…  tap to recognise'
+                          : _busy
+                              ? 'Starting…'
+                              : 'Tap to sign',
               style: const TextStyle(
                 color: Colors.white,
                 fontSize: 18,

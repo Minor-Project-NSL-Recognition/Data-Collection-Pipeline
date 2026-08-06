@@ -79,6 +79,27 @@ class Predictor:
             means, precision, thr, _ = ood.load_stats(ood_npz)
             self.ood = (means, precision, thr)
 
+        # The stored threshold is the p99 of *training* distances, so it assumes
+        # inference looks like recording did. A phone, an unseen signer and a
+        # lower capture fps all push embeddings outward, and a real sign can
+        # then land past a threshold fitted without any of them. This override
+        # lets that be corrected against the deployment in front of you without
+        # a retrain. `off` disables the gate entirely — a closed-world softmax
+        # that names a phrase for any input at all, including nonsense.
+        self.ood_threshold_source = "fitted"
+        override = os.environ.get("NSL_OOD_THRESHOLD", "").strip()
+        if override and self.ood is not None:
+            if override.lower() in ("off", "none", "0"):
+                self.ood = None
+                self.ood_threshold_source = "disabled"
+            else:
+                try:
+                    means, precision, _ = self.ood
+                    self.ood = (means, precision, float(override))
+                    self.ood_threshold_source = "override"
+                except ValueError:
+                    pass
+
     def _forward(self, fixed):
         """(seq_len, 225) -> (probs (n_classes,), embedding (d,))."""
         x = fixed[None, ...].astype(np.float32)

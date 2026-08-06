@@ -131,13 +131,30 @@ docker compose --profile quick up -d
 Prints something like `https://random-words-here.trycloudflare.com`, then checks
 `/health` through it. Put that URL and your API key into the app (gear icon).
 
-The hostname is **regenerated on every restart**. Fine for testing, wrong for
-demo day — you would be retyping a random URL into a phone in front of an
-audience.
+The hostname is **regenerated on every restart**, so plan for changing it on the
+phone rather than rebuilding the app:
+
+1. `bash scripts/tunnel_url.sh` — prints today's URL.
+2. Get it onto the phone however you like (chat, email, notes).
+3. In the app: **gear icon → paste button → Connect**.
+
+The API key does not change with the tunnel, so it stays filled in — only the
+URL needs replacing. The paste button exists because a quick tunnel hostname is
+40-odd random characters and typing it on a phone is the worst part of this
+workflow.
+
+If the app was built with `build_app.ps1`, **Use built-in server** puts the
+compiled-in URL back without a reinstall.
 
 ### Named tunnel — stable URL, needs a Cloudflare account
 
-Requires a domain on Cloudflare (a free `.dev`/cheap domain is enough).
+**This is the setup you want.** The URL survives restarts and reboots, and the
+app can have it compiled in, so there is nothing to type on demo day.
+
+Requires a domain on Cloudflare (a free `.dev`/cheap domain is enough). This is
+the one part nobody can do for you — the tunnel lives in *your* account.
+
+**One-time setup**
 
 1. Cloudflare Zero Trust → **Networks → Tunnels → Create a tunnel** → *Cloudflared*.
 2. Name it, then copy the **token** out of the install command it shows you.
@@ -145,17 +162,51 @@ Requires a domain on Cloudflare (a free `.dev`/cheap domain is enough).
    URL `server:8000` — the compose *service name*, not `localhost`. The
    cloudflared container resolves it on the compose network; `localhost` would
    point at cloudflared itself.
-4. Put the token in `.env` as `TUNNEL_TOKEN`.
+4. Put both values in `.env`:
 
-```bash
+   ```ini
+   TUNNEL_TOKEN=eyJhIjoi...            # from step 2
+   TUNNEL_HOSTNAME=nsl.yourdomain.com  # from step 3, no https://
+   ```
+
+5. Start it and confirm the whole path:
+
+   ```powershell
+   docker compose --profile named up -d
+   powershell -ExecutionPolicy Bypass -File scripts\check_tunnel.ps1
+   ```
+
+   `check_tunnel.ps1` checks localhost first and then the tunnel, so a failure
+   tells you which half is broken instead of just "it doesn't work".
+
+6. Build the app with that URL baked in:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File scripts\build_app.ps1 -Install
+   ```
+
+Now the app opens **straight to the camera** — no setup screen, no typing. The
+URL and key are compiled in via `--dart-define`, read in `app/lib/main.dart`.
+
+**After that, starting the server is one command:**
+
+```powershell
 docker compose --profile named up -d
-docker compose logs -f tunnel-named        # look for "Registered tunnel connection"
-curl https://nsl.yourdomain.com/health
-python scripts/test_client.py --url https://nsl.yourdomain.com --key <key>
 ```
 
-That URL now survives restarts and reboots. Enter it once in the app and never
-touch it again.
+`restart: unless-stopped` means it also comes back by itself after a reboot,
+as long as Docker Desktop is running.
+
+**Two things worth knowing**
+
+- A URL saved from the gear icon **wins over the compiled-in one** — it is a
+  deliberate override, and silently replacing it would be baffling. `-Install`
+  uninstalls first, which clears it, so a fresh install always uses the baked
+  value.
+- `build_app.ps1` defaults to `--release`, not debug. The frame encoder is pure
+  Dart and is the client-side bottleneck; release is AOT-compiled and markedly
+  faster. Since the model reads frame count as duration, a slow client costs
+  accuracy — so do not demo a debug build.
 
 ### What the tunnel changes
 
@@ -177,17 +228,30 @@ touch it again.
 
 ## On the day
 
-```bash
-docker compose up -d                  # add --profile quick / --profile named
-curl http://127.0.0.1:8000/health     # sanity
-ipconfig                              # LAN route: confirm the IP has not changed
-./scripts/tunnel_url.sh               # quick tunnel: get today's URL
+**Named tunnel (the whole thing):**
+
+```powershell
+docker compose --profile named up -d
+powershell -ExecutionPolicy Bypass -File scripts\check_tunnel.ps1
 ```
 
-Confirm the URL in the app (gear icon), then hold the button and sign.
+Open the app and sign. Nothing to type — the URL is compiled in, and it did not
+change overnight.
+
+**Quick tunnel or LAN**, where the address moves and must be re-entered:
+
+```powershell
+docker compose up -d                  # add --profile quick
+curl http://127.0.0.1:8000/health     # sanity
+ipconfig                              # LAN route: confirm the IP has not changed
+bash scripts/tunnel_url.sh            # quick tunnel: get today's URL
+```
+
+Confirm the URL in the app (gear icon), then tap the button, sign, and tap again.
 
 **If the IP changed**, that alone breaks the app. It changes whenever the
-network changes. Check it every single time.
+network changes. Check it every single time. This is exactly the failure a named
+tunnel removes.
 
 ---
 
