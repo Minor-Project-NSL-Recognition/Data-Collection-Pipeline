@@ -8,9 +8,9 @@
     "need_toilet",
     "none"
   ],
-  "seq_len": 148,
+  "seq_len": 137,
   "confidence_threshold": 0.75,
-  "ood_threshold": 11.960620326171675,
+  "ood_threshold": 15.34290002873187,
   "ood_percentile": 99.0,
   "ood_stats": "ood_stats.npz",
   "tflite": "model.tflite",
