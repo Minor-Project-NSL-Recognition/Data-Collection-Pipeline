@@ -1,15 +1,3 @@
-"""Model loading + the decision rule, shared by every endpoint.
-
-Deliberately reuses nslr.preprocess rather than reimplementing it: the whole
-point of serving from Python is that the request path is byte-for-byte the
-pipeline the 99.7% number was measured on. Any divergence here silently
-invalidates that number.
-
-Runs the TFLite export by preference (no TensorFlow in the container, ~900 KB
-instead of a 2.3 MB Keras file plus a 3 GB dependency), falling back to
-model.keras when TFLite is unavailable.
-"""
-
 import json
 import os
 

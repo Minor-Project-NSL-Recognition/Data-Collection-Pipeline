@@ -181,9 +181,14 @@ trained with early stopping on validation loss. **This script only measures
 accuracy — it does not save a model.** Outputs:
 
 - `results/metrics.json` — fold accuracies, confusion matrix, per-class
-  precision/recall/F1
+  precision/recall/F1, and `epochs_run` (where early stopping landed per fold)
 - `results/confusion_matrix_signer_indep.png`
-- `results/training_curves.png`
+- `results/training_curves.png` — accuracy per fold, one panel each. The
+  dashed line is that fold's held-out signer; `train`/`val` are both drawn from
+  the signers *inside* training, so the gap between them and the dashed line is
+  the cost of an unseen signer, visible per fold.
+- `results/training_loss_curves.png` — the same grid for loss (`val_loss` is
+  what early stopping monitors)
 
 ### 5. Train a deployable model
 

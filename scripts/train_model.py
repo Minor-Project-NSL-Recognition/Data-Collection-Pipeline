@@ -61,6 +61,8 @@ def main():
     p.add_argument("--ood-percentile", type=float, default=99.0,
                    help="reject inputs farther than this percentile of in-distribution distances")
     p.add_argument("--verbose", type=int, default=0, choices=[0, 1, 2])
+    p.add_argument("--deterministic", action=argparse.BooleanOptionalAction, default=True,
+                   help="reproducible runs; SEED alone does not achieve this (see train_eval.py)")
     a = p.parse_args()
 
     import random
@@ -71,6 +73,8 @@ def main():
     random.seed(SEED)
     np.random.seed(SEED)
     tf.random.set_seed(SEED)
+    if a.deterministic:
+        tf.config.experimental.enable_op_determinism()
 
     X, y, _, class_names = load_processed(a.processed)
     n_classes = len(class_names)
@@ -82,10 +86,18 @@ def main():
     weights = compute_class_weight("balanced", classes=present, y=y_tr)
     class_weight = {int(c): float(w) for c, w in zip(present, weights)}
 
+    # Same callbacks as train_eval.py's folds, deliberately. The measured 97%
+    # only transfers to this model because the recipe is identical -- if the two
+    # scripts train differently, the leave-one-signer-out number stops being an
+    # estimate of anything you ship. See train_eval.train_one for why min_delta
+    # and the LR schedule are here.
     model = build_bilstm(X.shape[1], X.shape[2], n_classes)
-    es = keras.callbacks.EarlyStopping(monitor="val_loss", patience=15, restore_best_weights=True)
+    es = keras.callbacks.EarlyStopping(monitor="val_loss", patience=15,
+                                       min_delta=1e-3, restore_best_weights=True)
+    lr = keras.callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.5,
+                                           patience=6, min_lr=1e-5)
     hist = model.fit(X_tr, y_tr, validation_data=(X_val, y_val), epochs=a.epochs,
-                     batch_size=a.batch_size, class_weight=class_weight, callbacks=[es],
+                     batch_size=a.batch_size, class_weight=class_weight, callbacks=[es, lr],
                      verbose=a.verbose)
 
     os.makedirs(a.results, exist_ok=True)
