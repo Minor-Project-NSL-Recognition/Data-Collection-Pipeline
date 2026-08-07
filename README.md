@@ -39,6 +39,11 @@ scripts/               thin entrypoints (import nslr)
   train_eval.py        signer-independent + random-split evaluation (metrics only)
   train_model.py       train one deployable model on all data -> model.keras
   live_demo.py         webcam tester using the saved model
+  export_tflite.py     model.keras -> model.tflite (+ ood.json) for serving
+  parity_spike.py      Holistic vs MediaPipe-Tasks landmarks (mobile feasibility)
+  parity_report.py     aggregate parity clips into a go / no-go verdict
+  test_client.py       smoke-test a running server without a phone
+server/                FastAPI service for the mobile app (see server/README.md)
 notebooks/             experiments (import nslr; don't define core logic here)
 data/                  raw/ (recorded clips) and processed/ (generated tensors) — created locally, gitignored
 results/               metrics.json, model_meta.json (committed) + model.keras, PNGs (generated, gitignored)
@@ -176,9 +181,14 @@ trained with early stopping on validation loss. **This script only measures
 accuracy — it does not save a model.** Outputs:
 
 - `results/metrics.json` — fold accuracies, confusion matrix, per-class
-  precision/recall/F1
+  precision/recall/F1, and `epochs_run` (where early stopping landed per fold)
 - `results/confusion_matrix_signer_indep.png`
-- `results/training_curves.png`
+- `results/training_curves.png` — accuracy per fold, one panel each. The
+  dashed line is that fold's held-out signer; `train`/`val` are both drawn from
+  the signers *inside* training, so the gap between them and the dashed line is
+  the cost of an unseen signer, visible per fold.
+- `results/training_loss_curves.png` — the same grid for loss (`val_loss` is
+  what early stopping monitors)
 
 ### 5. Train a deployable model
 
@@ -204,6 +214,20 @@ In the tester: **SPACE** to start a sign, **SPACE** again to stop and classify,
 then predict) because the model expects one complete sign per input and has no
 "idle" class — continuous always-on prediction would be unreliable. A confidence
 threshold (default 0.75) suppresses unsure guesses.
+
+### 7. Serve it to a mobile app
+
+```bash
+python scripts/export_tflite.py                  # -> results/model.tflite (882 KB)
+pip install fastapi "uvicorn[standard]"
+uvicorn server.app:app --host 0.0.0.0 --port 8000
+python scripts/test_client.py                    # verify without a phone
+```
+
+A Flutter client streams JPEG frames over `WS /ws/stream` while the user signs;
+the server runs the same Holistic → `nslr.preprocess` → BiLSTM path as
+`live_demo.py` and returns the phrase. Full protocol and deployment notes in
+[server/README.md](server/README.md).
 
 ## Current results
 

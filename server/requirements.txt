@@ -1,0 +1,25 @@
+# Serving stack (Linux / Docker target).
+#
+# Same interlocking pins as the root requirements.txt -- mediapipe 0.10.14 forces
+# protobuf<5, which caps numpy and opencv in turn. Do not bump these
+# individually; the chain is protobuf -> numpy -> opencv.
+#
+# The notable difference from the root file: NO tensorflow. The server runs the
+# ~880 KB TFLite export via tflite-runtime instead, which takes the image from
+# roughly 3 GB to under 1 GB. Generate it first:
+#
+#     python scripts/export_tflite.py
+#
+# tflite-runtime ships manylinux wheels but NOT Windows ones. For local dev on
+# Windows just use the project .venv (which has full TensorFlow) and add
+# `pip install fastapi "uvicorn[standard]"` -- both are additive and touch none
+# of the pinned numeric packages.
+
+mediapipe==0.10.14
+opencv-contrib-python-headless==4.10.0.84
+numpy==1.26.4
+protobuf==4.25.9
+tflite-runtime==2.14.0
+
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
