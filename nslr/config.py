@@ -48,6 +48,32 @@ HAND_MIDDLE_FINGER_MCP = 9
 EPS = 1e-6
 FALLBACK_SEQ_LEN = 151   # used only if seq_len.json is missing
 
+
+def env_setting(name, default=""):
+    """`name` from the process environment, falling back to the repo-root .env.
+
+    `docker compose` reads .env itself, so the containerized server never needed
+    this. A script launched straight from a shell does: without it a value tuned
+    in .env (NSL_OOD_THRESHOLD, say) applies in the container and silently does
+    nothing locally, which looks like the setting being ignored rather than
+    never being read. Same KEY=VALUE parsing as scripts/build_app.ps1.
+    """
+    value = os.environ.get(name)
+    if value is not None:
+        return value.strip()
+    try:
+        with open(os.path.join(REPO_ROOT, ".env")) as fh:
+            for line in fh:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.partition("=")
+                if key.strip() == name:
+                    return val.strip()
+    except OSError:
+        pass
+    return default
+
 # Effective capture rate of the recorded dataset, measured from the per-clip
 # metadata (n_frames / duration_sec over all 570 clips): median 15.7, range
 # 10.8-21.2. record.py never locked a frame rate -- it ran as fast as Tkinter

@@ -121,11 +121,28 @@ def main():
         print("Open-set rejection DISABLED (--no-ood): showing softmax's top pick.")
     elif os.path.exists(ood_path):
         means, precision, ood_thr, _ = ood.load_stats(ood_path)
-        if a.ood_threshold is not None:
-            ood_thr = a.ood_threshold
-        ood_stats = (means, precision, ood_thr)
-        print(f"Open-set gate ON (reject distance > {ood_thr:.1f}). "
-              f"Watch the [dist ..] readout; raise with --ood-threshold or turn off with --no-ood.")
+        source = "fitted"
+        # Honour the same NSL_OOD_THRESHOLD the server reads, so a threshold
+        # tuned against a real deployment applies here too. Without this the
+        # gate silently stays at the fitted value while .env says otherwise.
+        override = C.env_setting("NSL_OOD_THRESHOLD")
+        if override:
+            if override.lower() in ("off", "none", "0"):
+                ood_thr, source = None, "off"
+            else:
+                try:
+                    ood_thr, source = float(override), "NSL_OOD_THRESHOLD"
+                except ValueError:
+                    print(f"Ignoring NSL_OOD_THRESHOLD={override!r} — not a number.")
+        if a.ood_threshold is not None:      # an explicit flag beats the environment
+            ood_thr, source = a.ood_threshold, "--ood-threshold"
+
+        if ood_thr is None:
+            print("Open-set rejection DISABLED (NSL_OOD_THRESHOLD=off): showing softmax's top pick.")
+        else:
+            ood_stats = (means, precision, ood_thr)
+            print(f"Open-set gate ON (reject distance > {ood_thr:.1f}, {source}). "
+                  f"Watch the [dist ..] readout; raise with --ood-threshold or turn off with --no-ood.")
     else:
         print("No ood_stats.npz — running without open-set rejection.")
 
