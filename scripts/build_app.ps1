@@ -28,6 +28,7 @@ param(
     [string]$ApiKey,
     [switch]$DebugBuild,
     [switch]$Install,
+    [switch]$SplitPerAbi,
     [string]$Device
 )
 
@@ -91,6 +92,10 @@ try {
         "--dart-define=NSL_SERVER_URL=$Url",
         "--dart-define=NSL_API_KEY=$ApiKey"
     )
+    # One APK per CPU architecture instead of a fat one carrying all three.
+    # The arm64 slice is roughly a third the size, which matters when the APK
+    # has to be sent to the phone over a chat app rather than a cable.
+    if ($SplitPerAbi) { $buildArgs += '--split-per-abi' }
     & flutter @buildArgs
     if ($LASTEXITCODE -ne 0) { throw "flutter build failed ($LASTEXITCODE)" }
 
@@ -108,3 +113,8 @@ try {
 
 Write-Host ''
 Write-Host 'Done. The app opens straight to the camera, with no setup screen.'
+Write-Host ''
+$apkDir = Join-Path $repo 'app\build\app\outputs\flutter-apk'
+Get-ChildItem -Path $apkDir -Filter '*release*.apk' -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending |
+    ForEach-Object { "  {0,-40} {1,6:N1} MB" -f $_.Name, ($_.Length / 1MB) }
