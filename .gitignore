@@ -1,3 +1,5 @@
+miniproenv/
+dataset/
 .venv/
 .venv-train/
 dataset/
@@ -8,5 +10,20 @@ Data/
 *.npy
 *.mp4
 *.png
+<<<<<<< HEAD
+
+=======
 *.keras
+
+# ...but the Flutter app's launcher icons and image assets are source, not
+# generated output. Without these the Android build fails at
+# processDebugResources with "resource mipmap/ic_launcher not found".
+!app/**/*.png
 .recorder_config.json
+
+# MediaPipe Tasks model bundles (~17 MB, re-downloadable) and TFLite exports
+models/tasks/*.task
+*.tflite
+
+# Secrets: API key + Cloudflare tunnel token. .env.example is the committed one.
+.env

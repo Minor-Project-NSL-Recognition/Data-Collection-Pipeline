@@ -22,6 +22,10 @@ CLASSES = {
     "need_ambulance":   "4. I need an ambulance (Medical)",
     "help_danger":      "5. Help me / I am in danger (Generic)",
     "need_toilet":      "6. I need to go to the toilet (Basic need)",
+    # Optional 7th "negative" class for open-set training: rest, random motion,
+    # partial/mixed gestures. The pipeline ignores it until it has clips, then
+    # trains it as a real class. Record into it to teach the model "not a sign".
+    "none":             "7. Unknown / none of the above (negatives)",
 }
 
 POSE_LANDMARKS = 33
@@ -43,3 +47,13 @@ HAND_MIDDLE_FINGER_MCP = 9
 
 EPS = 1e-6
 FALLBACK_SEQ_LEN = 151   # used only if seq_len.json is missing
+
+# Effective capture rate of the recorded dataset, measured from the per-clip
+# metadata (n_frames / duration_sec over all 570 clips): median 15.7, range
+# 10.8-21.2. record.py never locked a frame rate -- it ran as fast as Tkinter
+# plus MediaPipe allowed -- so this is an observed property of the data, not a
+# setting. It matters at inference: the model reads frame COUNT as duration, so
+# a client capturing the same sign at 30 fps produces twice the frames and a
+# temporal scale the model has never seen. Any real-time path must decimate to
+# roughly this rate before extracting landmarks.
+TRAIN_CAPTURE_FPS = 15.7

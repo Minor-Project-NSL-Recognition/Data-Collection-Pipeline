@@ -2,9 +2,7 @@
   "config": {
     "epochs": 200,
     "batch_size": 16,
-    "seq_len": 151,
-    "n_features": 225,
-    "n_params": 191974,
+    "seq_len": 137,
     "seed": 42
   },
   "class_names": [
@@ -13,64 +11,79 @@
     "cant_breathe",
     "help_danger",
     "need_ambulance",
-    "need_toilet"
+    "need_toilet",
+    "none"
   ],
   "signer_independent": {
     "test_signers": [
+      "signer01",
       "signer02",
       "signer03",
-      "signer04"
+      "signer04",
+      "signer05",
+      "signer06",
+      "signer07",
+      "signer08"
     ],
-    "train_only_signers": [
-      "signer01"
-    ],
+    "train_only_signers": [],
     "fold_accuracy": {
-      "signer02": 1.0,
-      "signer03": 1.0,
-      "signer04": 0.9921259842519685
+      "signer01": 0.9714285714285714,
+      "signer02": 0.9785714285714285,
+      "signer03": 0.9714285714285714,
+      "signer04": 0.9571428571428572,
+      "signer05": 1.0,
+      "signer06": 0.9857142857142858,
+      "signer07": 0.9285714285714286,
+      "signer08": 0.9285714285714286
     },
-    "mean_accuracy": 0.9973753280839895,
-    "std_accuracy": 0.0037118466204018176,
-    "pooled_accuracy": 0.9972826086956522,
+    "mean_accuracy": 0.9651785714285714,
+    "std_accuracy": 0.024074051361987064,
+    "pooled_accuracy": 0.9666666666666667,
+    "epochs_run": {
+      "signer01": 39,
+      "signer02": 42,
+      "signer03": 28,
+      "signer04": 44,
+      "signer05": 67,
+      "signer06": 24,
+      "signer07": 24,
+      "signer08": 49
+    },
     "confusion_matrix": [
       [
-        60,
+        116,
         0,
         0,
         0,
         0,
-        0
+        0,
+        4
       ],
       [
         0,
-        61,
+        116,
+        4,
         0,
         0,
-        0,
-        0
-      ],
-      [
-        0,
-        0,
-        61,
-        0,
-        0,
-        0
-      ],
-      [
-        0,
-        0,
-        0,
-        61,
         0,
         0
       ],
       [
         1,
         0,
+        119,
         0,
         0,
-        59,
+        0,
+        0
+      ],
+      [
+        0,
+        1,
+        0,
+        119,
+        0,
+        0,
         0
       ],
       [
@@ -78,64 +91,89 @@
         0,
         0,
         0,
+        116,
         0,
-        65
+        4
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        119,
+        1
+      ],
+      [
+        4,
+        3,
+        1,
+        0,
+        3,
+        2,
+        107
       ]
     ],
     "per_class": {
       "building_on_fire": {
-        "precision": 0.9836065573770492,
-        "recall": 1.0,
-        "f1-score": 0.9917355371900827,
-        "support": 60.0
+        "precision": 0.9586776859504132,
+        "recall": 0.9666666666666667,
+        "f1-score": 0.9626556016597511,
+        "support": 120.0
       },
       "call_police": {
-        "precision": 1.0,
-        "recall": 1.0,
-        "f1-score": 1.0,
-        "support": 61.0
+        "precision": 0.9666666666666667,
+        "recall": 0.9666666666666667,
+        "f1-score": 0.9666666666666667,
+        "support": 120.0
       },
       "cant_breathe": {
-        "precision": 1.0,
-        "recall": 1.0,
-        "f1-score": 1.0,
-        "support": 61.0
+        "precision": 0.9596774193548387,
+        "recall": 0.9916666666666667,
+        "f1-score": 0.9754098360655737,
+        "support": 120.0
       },
       "help_danger": {
         "precision": 1.0,
-        "recall": 1.0,
-        "f1-score": 1.0,
-        "support": 61.0
+        "recall": 0.9916666666666667,
+        "f1-score": 0.99581589958159,
+        "support": 120.0
       },
       "need_ambulance": {
-        "precision": 1.0,
-        "recall": 0.9833333333333333,
-        "f1-score": 0.9915966386554622,
-        "support": 60.0
+        "precision": 0.9747899159663865,
+        "recall": 0.9666666666666667,
+        "f1-score": 0.9707112970711297,
+        "support": 120.0
       },
       "need_toilet": {
-        "precision": 1.0,
-        "recall": 1.0,
-        "f1-score": 1.0,
-        "support": 65.0
+        "precision": 0.9834710743801653,
+        "recall": 0.9916666666666667,
+        "f1-score": 0.9875518672199171,
+        "support": 120.0
       },
-      "accuracy": 0.9972826086956522,
+      "none": {
+        "precision": 0.9224137931034483,
+        "recall": 0.8916666666666667,
+        "f1-score": 0.9067796610169492,
+        "support": 120.0
+      },
+      "accuracy": 0.9666666666666667,
       "macro avg": {
-        "precision": 0.9972677595628415,
-        "recall": 0.9972222222222222,
-        "f1-score": 0.9972220293075909,
-        "support": 368.0
+        "precision": 0.9665280793459884,
+        "recall": 0.9666666666666667,
+        "f1-score": 0.9665129756116538,
+        "support": 840.0
       },
       "weighted avg": {
-        "precision": 0.9973271560940842,
-        "recall": 0.9972826086956522,
-        "f1-score": 0.9972824199748171,
-        "support": 368.0
+        "precision": 0.9665280793459884,
+        "recall": 0.9666666666666667,
+        "f1-score": 0.9665129756116538,
+        "support": 840.0
       }
     }
   },
   "random_split_baseline": {
-    "test_accuracy": 0.9859154929577465,
-    "n_test": 71
+    "test_accuracy": 0.9920634920634921,
+    "n_test": 126
   }
 }

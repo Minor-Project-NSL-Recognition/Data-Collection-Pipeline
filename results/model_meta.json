@@ -8,6 +8,9 @@
     "need_toilet",
     "none"
   ],
-  "seq_len": 148,
-  "confidence_threshold": 0.75
+  "seq_len": 137,
+  "confidence_threshold": 0.75,
+  "ood_threshold": 14.165496334364558,
+  "ood_percentile": 99.0,
+  "ood_stats": "ood_stats.npz"
 }

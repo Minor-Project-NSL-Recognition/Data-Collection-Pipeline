@@ -1,0 +1,29 @@
+name: nsl_app
+description: "Nepali Sign Language emergency-phrase recognition client."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  camera: ^0.11.0+2           # image stream -> raw frames
+  web_socket_channel: ^3.0.1  # /ws/stream
+  image: ^4.3.0               # YUV420 -> JPEG (runs in an isolate)
+  flutter_tts: ^4.2.0         # speaks the recognized phrase
+  shared_preferences: ^2.3.3  # remembers the server URL between runs
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  # Drop pre-recorded Nepali audio here later and swap flutter_tts for
+  # just_audio -- device TTS rarely has a usable ne-NP voice.
+  # assets:
+  #   - assets/audio/

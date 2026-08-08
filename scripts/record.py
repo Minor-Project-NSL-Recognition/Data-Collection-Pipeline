@@ -93,12 +93,15 @@ class RecorderApp:
         ttk.Entry(main, textvariable=self.signer_id, width=36).grid(row=3, column=1, sticky="w", pady=(0, 10))
 
         ttk.Label(main, text="Phrase (class)", font=("", 10, "bold")).grid(row=4, column=1, sticky="w")
+        # Radios occupy rows 5 .. 5+n-1; everything below is offset by the class
+        # count so adding/removing a class (e.g. the 'none' negatives) never collides.
         for i, (key, label) in enumerate(C.CLASSES.items()):
             ttk.Radiobutton(main, text=label, value=key, variable=self.current_class,
                             command=self._release_focus).grid(row=5 + i, column=1, sticky="w")
+        base = 5 + len(C.CLASSES)
 
         controls = ttk.Frame(main)
-        controls.grid(row=11, column=1, sticky="w", pady=(12, 0))
+        controls.grid(row=base, column=1, sticky="w", pady=(12, 0))
         self.btn_start = ttk.Button(controls, text="● Start recording", command=self.start_recording)
         self.btn_start.pack(side="left")
         self.btn_stop = ttk.Button(controls, text="■ Stop & save", command=self.stop_recording, state="disabled")
@@ -106,12 +109,12 @@ class RecorderApp:
         self.btn_discard = ttk.Button(controls, text="Discard", command=self.discard_recording, state="disabled")
         self.btn_discard.pack(side="left", padx=(6, 0))
 
-        ttk.Separator(main, orient="horizontal").grid(row=12, column=1, sticky="ew", pady=8)
-        ttk.Label(main, textvariable=self.status, wraplength=320).grid(row=13, column=1, sticky="w")
+        ttk.Separator(main, orient="horizontal").grid(row=base + 1, column=1, sticky="ew", pady=8)
+        ttk.Label(main, textvariable=self.status, wraplength=320).grid(row=base + 2, column=1, sticky="w")
 
         self.counts = tk.StringVar(value="")
         ttk.Label(main, textvariable=self.counts, wraplength=320, foreground="#555").grid(
-            row=14, column=1, sticky="w", pady=(6, 0))
+            row=base + 3, column=1, sticky="w", pady=(6, 0))
 
         self.root.bind("<space>", self._on_space)
         self.root.bind("<Escape>", self._on_escape)
