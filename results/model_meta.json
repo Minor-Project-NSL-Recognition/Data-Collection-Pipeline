@@ -10,13 +10,7 @@
   ],
   "seq_len": 137,
   "confidence_threshold": 0.75,
-  "ood_threshold": 15.34290002873187,
+  "ood_threshold": 14.165496334364558,
   "ood_percentile": 99.0,
-  "ood_stats": "ood_stats.npz",
-  "tflite": "model.tflite",
-  "tflite_verified": {
-    "worst_abs_prob_diff": 1.1920928955078125e-07,
-    "argmax_agreement": 1.0,
-    "n_clips": 30
-  }
+  "ood_stats": "ood_stats.npz"
 }

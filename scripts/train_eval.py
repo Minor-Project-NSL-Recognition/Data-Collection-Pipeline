@@ -147,6 +147,25 @@ def plot_confusion(cm, class_names, path, title):
     plt.close(fig)
 
 
+def plot_loso_bar(test_signers, fold_accuracy, path, title):
+    """Bar plot of leave-one-signer-out accuracy per held-out signer."""
+    # Preserve the signer order in test_signers
+    accs = [float(fold_accuracy[s]) for s in test_signers]
+    fig, ax = plt.subplots(figsize=(max(6, len(test_signers) * 0.6), 4))
+    xs = range(len(test_signers))
+    bars = ax.bar(xs, accs, color="tab:blue")
+    ax.set_xticks(xs)
+    ax.set_xticklabels(test_signers, rotation=45, ha="right")
+    ax.set_ylim(0, 1)
+    ax.set_ylabel("Accuracy")
+    ax.set_title(title)
+    for i, v in enumerate(accs):
+        ax.text(i, v + 0.01, f"{v:.2f}", ha="center", va="bottom", fontsize=9)
+    fig.tight_layout()
+    fig.savefig(path, dpi=120)
+    plt.close(fig)
+
+
 def plot_fold_grid(histories, path, metric, suptitle):
     """One panel per leave-one-signer-out fold.
 
@@ -251,6 +270,10 @@ def main():
                    f"dashed = the held-out signer (pooled {si['pooled_accuracy']:.3f})")
     plot_fold_grid(histories, os.path.join(a.results, "training_loss_curves.png"), "loss",
                    "Loss per fold — val_loss is what EarlyStopping monitors")
+    # Bar chart: LOSO accuracy per held-out signer
+    plot_loso_bar(si["test_signers"], si["fold_accuracy"],
+                  os.path.join(a.results, "loso_per_signer.png"),
+                  f"LOSO accuracy per held-out signer — mean {si['mean_accuracy']:.3f}")
     with open(os.path.join(a.results, "metrics.json"), "w") as fh:
         json.dump({"config": {"epochs": a.epochs, "batch_size": a.batch_size,
                               "seq_len": int(X.shape[1]), "seed": SEED},

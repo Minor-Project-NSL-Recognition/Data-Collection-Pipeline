@@ -35,16 +35,23 @@ def synth_ood(X, y, n=300):
     (first half of one sign + second half of another)."""
     rng = np.random.default_rng(SEED)
     half_t = X.shape[1] // 2
+    #  This saves the Synthetic OOD Samples. 
     out = []
+
+    # This uses the first method that is  time shuffling to create sythetic OOD samples.  
     for _ in range(n // 2):
         c = X[rng.integers(len(X))].copy()
         rng.shuffle(c)                      # shuffle along the time axis
         out.append(c)
+
+    # This uses the second method that is cross-class mixing to create sythetic OOD samples where the first half of sample comes from one clip and the second half comes from another clip
     for _ in range(n - n // 2):
         i = rng.integers(len(X))
         j = rng.integers(len(X))
         while y[j] == y[i]:
+            # continously sample randomly untile we get diff values for i and j 
             j = rng.integers(len(X))
+        # This is where the firt half of the sample comes from the ith and second half comes from the jth sample 
         out.append(np.concatenate([X[i][:half_t], X[j][half_t:]], axis=0))
     return np.stack(out).astype(np.float32)
 
