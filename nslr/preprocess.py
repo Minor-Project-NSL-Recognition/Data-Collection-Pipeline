@@ -32,8 +32,11 @@ def normalize_pose_block(flat_block):
 
 def normalize_clip(clip):
     """Normalize every frame of a (n_frames, 225) clip, blocks independent."""
+    # this is used for faster computation over np.zero_like and our code is safe enough to overwrite all the garbage values
     out = np.empty_like(clip)
+    # this normalizes every single frame of the every single clip
     for t in range(clip.shape[0]):
+        #this is different than traditional 2d array indexing. Slice object allows us to select whole portion of array instead of just a single specific value.
         out[t, C.POSE_SLICE] = normalize_pose_block(clip[t, C.POSE_SLICE])
         out[t, C.LEFT_HAND_SLICE] = normalize_hand_block(clip[t, C.LEFT_HAND_SLICE])
         out[t, C.RIGHT_HAND_SLICE] = normalize_hand_block(clip[t, C.RIGHT_HAND_SLICE])

@@ -11,7 +11,10 @@ def extract_frame_vector(results):
     pose = np.zeros(C.POSE_DIM, dtype=np.float32)
     left = np.zeros(C.HAND_DIM, dtype=np.float32)
     right = np.zeros(C.HAND_DIM, dtype=np.float32)
+    # these are just dummy arrays to be filled with correct datapoints below 
+
     flags = {"pose": False, "left_hand": False, "right_hand": False}
+    # these flags turn true when the hands or pose are detected 
 
     if results.pose_landmarks:
         pose = np.array([[lm.x, lm.y, lm.z] for lm in results.pose_landmarks.landmark],
@@ -25,7 +28,10 @@ def extract_frame_vector(results):
         right = np.array([[lm.x, lm.y, lm.z] for lm in results.right_hand_landmarks.landmark],
                          dtype=np.float32).flatten()
         flags["right_hand"] = True
+    #  The flatten method will turn all hte numbers from [[1,2,3],[4,5,6]] into [1,2,3,4,5,6]
 
     vector = np.concatenate([pose, left, right])
+    # joins all the landmarks together into a 255 long array.
+
     assert vector.shape[0] == C.FEATURE_DIM, f"expected {C.FEATURE_DIM}, got {vector.shape[0]}"
     return vector, flags

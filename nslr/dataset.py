@@ -16,14 +16,18 @@ def compile_dataset(data_path=C.RAW_DIR, out_dir=C.PROCESSED_DIR,
     Returns a summary dict. seq_len defaults to <out_dir>/seq_len.json."""
     os.makedirs(out_dir, exist_ok=True)
     if seq_len is None:
+        # load_seq_len (out_dir) goes into the processed directory and finds the seq_len.json and returns the seq_len calculated before
         seq_len = load_seq_len(out_dir)
-
+        
+    #  this code ensures that only the contents of the raw directory whcih are directories themselves containing the raw clips will only be listed in the class_names list
     class_names = sorted(d for d in os.listdir(data_path)
                          if os.path.isdir(os.path.join(data_path, d)))
     if not class_names:
         raise SystemExit(f"No class folders under {data_path}")
-    label_map = {name: i for i, name in enumerate(class_names)}
 
+    # indexing the classes using a dictionary as it is req later down the line
+    label_map = {name: i for i, name in enumerate(class_names)}
+    
     X, masks, y, manifest, dropped = [], [], [], [], []
     modes = {"exact": 0, "subsampled": 0, "padded": 0}
 
@@ -33,6 +37,7 @@ def compile_dataset(data_path=C.RAW_DIR, out_dir=C.PROCESSED_DIR,
             fpath = os.path.join(cdir, fname)
             signer = fname.split("__")[1] if "__" in fname else ""
 
+            #  this can be ignored as we are passing every single vid into preprocessing regardless of their hand detenction    
             if min_hand_detect > 0.0:
                 any_hand = _read_any_hand(fpath[:-4] + ".json")
                 if any_hand is not None and any_hand < min_hand_detect:
@@ -46,7 +51,7 @@ def compile_dataset(data_path=C.RAW_DIR, out_dir=C.PROCESSED_DIR,
                 dropped.append({"class": name, "signer": signer, "source_file": fpath,
                                 "any_hand_detect_rate": "", "reason": f"bad_shape={raw.shape}"})
                 continue
-
+            #first normalize the clip and standarize the length 
             fixed, mask, mode = standardize_length(normalize_clip(raw), seq_len)
             modes[mode] += 1
             X.append(fixed)

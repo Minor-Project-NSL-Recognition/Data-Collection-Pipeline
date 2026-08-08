@@ -5,8 +5,9 @@
     "cant_breathe",
     "help_danger",
     "need_ambulance",
-    "need_toilet"
+    "need_toilet",
+    "none"
   ],
-  "seq_len": 151,
+  "seq_len": 148,
   "confidence_threshold": 0.75
 }

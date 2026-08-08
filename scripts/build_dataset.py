@@ -24,7 +24,9 @@ def main():
                    help="drop clips whose any_hand_detect_rate is below this (0..1); default keeps all")
     a = p.parse_args()
 
+    # a.data=raw data path , a.out= processed directory data path , a.min_hand_detect = minimum detection required to pass on to the processing pipeline
     r = compile_dataset(a.data, a.out, a.min_hand_detect)
+    
     X, mask, y, modes = r["X"], r["mask"], r["y"], r["modes"]
 
     print(f"\nSEQ_LEN {r['seq_len']} | X {X.shape} mask {mask.shape} y {y.shape}"
