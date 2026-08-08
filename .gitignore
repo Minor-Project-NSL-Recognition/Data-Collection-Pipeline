@@ -1,9 +1,9 @@
+miniproenv/
+dataset/
 .venv/
 .venv-train/
-dataset/
 __pycache__/
 
-    
 Data/
 *.npy
 *.mp4

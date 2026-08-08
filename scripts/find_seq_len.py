@@ -21,8 +21,11 @@ from nslr import config as C
 
 def frame_counts(data_path):
     counts = []
+
     for cls in sorted(os.listdir(data_path)):
+#  this lists the directories insidied the raw data folder 
         cdir = os.path.join(data_path, cls)
+# this create the abs path of each of the directories for the 
         if not os.path.isdir(cdir):
             continue
         for f in os.listdir(cdir):
@@ -44,7 +47,11 @@ def main():
         raise SystemExit(f"No .npy clips under {a.data}")
 
     pct = float(np.percentile(counts, a.percentile))
+    # this calculates the actual 95th percentile of the distribution of the frame counts of the file as  a.percentile=95.
+     
     seq_len = int(round(pct))
+    # rounding off the seq_len
+
     print(f"{len(counts)} clips | min={counts.min()} mean={counts.mean():.1f} "
           f"median={np.median(counts):.0f} max={counts.max()} | p{a.percentile:g}={pct:.1f}")
     print(f"SEQ_LEN = {seq_len}")
