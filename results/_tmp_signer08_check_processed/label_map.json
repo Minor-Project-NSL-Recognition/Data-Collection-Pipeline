@@ -1,0 +1,9 @@
+{
+  "building_on_fire": 0,
+  "call_police": 1,
+  "cant_breathe": 2,
+  "help_danger": 3,
+  "need_ambulance": 4,
+  "need_toilet": 5,
+  "none": 6
+}
