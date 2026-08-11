@@ -11,14 +11,27 @@ across 6 classes — see [Current results](#current-results).
 
 ## The six phrases
 
-| Key | GUI label |
-|---|---|
-| `cant_breathe` | 1. I can't breathe (Medical) |
-| `building_on_fire` | 2. The building is on fire (Fire) |
-| `call_police` | 3. Call the police (Crime) |
-| `need_ambulance` | 4. I need an ambulance (Medical) |
-| `help_danger` | 5. Help me / I am in danger (Generic) |
-| `need_toilet` | 6. I need to go to the toilet (Basic need) |
+| Key | GUI label | Nepali |
+|---|---|---|
+| `cant_breathe` | 1. I can't breathe (Medical) | म सास फेर्न सक्दिन। |
+| `building_on_fire` | 2. The building is on fire (Fire) | घरमा आगो लाग्यो। |
+| `call_police` | 3. Call the police (Crime) | प्रहरीलाई बोलाऊ। |
+| `need_ambulance` | 4. I need an ambulance (Medical) | मलाई एम्बुलेन्स चाहियो। |
+| `help_danger` | 5. Help me / I am in danger (Generic) | मलाई मद्दत गर्नुहोस्, म खतरामा छु। |
+| `need_toilet` | 6. I need to go to the toilet (Basic need) | मलाई शौचालय जानु छ। |
+
+Each phrase also has a recorded Nepali voice clip, played whenever a sign is
+accepted — by the phone app and by `scripts/live_demo.py`, from the same files.
+Recordings live in [`assets/audio/src/`](assets/audio/src/) in whatever format
+the phone produced; `python scripts/build_audio.py` trims, loudness-matches and
+converts them to the 48 kHz mono WAVs in `app/assets/audio/ne/`. There is no
+clip for `none` by design: a rejected sign must stay silent.
+
+Both label columns are **generated from [`app/assets/phrases.json`](app/assets/phrases.json)**,
+which `nslr/config.py` and `app/lib/local_recognizer.dart` both load at runtime.
+Edit wording there and nowhere else; this table is the one copy that still needs
+updating by hand, along with the defense slides. Class *keys* are frozen — the
+model was trained on them, so renaming one means re-recording and refitting.
 
 (Phrase #6 is `need_toilet` by design — the proposal text still says
 "earthquake"; the data/code here is the source of truth.)

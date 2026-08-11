@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_tts/flutter_tts.dart';
+import 'nepali_voice.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'frame_encoder.dart';
@@ -51,7 +51,7 @@ class _SignPageState extends State<SignPage> with WidgetsBindingObserver {
   CameraController? _camera;
   FrameEncoder? _encoder;
   final _client = NslClient();
-  final _tts = FlutterTts();
+  NepaliVoice? _voice;
   StreamSubscription<NslAck>? _ackSub;
   StreamSubscription<NslException>? _closedSub;
 
@@ -107,9 +107,16 @@ class _SignPageState extends State<SignPage> with WidgetsBindingObserver {
       final mirror = prefs.getBool(_prefsMirrorPreview) ?? false;
 
       final encoder = await FrameEncoder.spawn();
-      if (!mounted) return;
+      // null: this path has no local model, so the class list comes from
+      // assets/phrases.json instead of model_meta.json.
+      final voice = await NepaliVoice.load(null);
+      if (!mounted) {
+        await voice.dispose();
+        return;
+      }
       _cameras = cameras;
       _encoder = encoder;
+      _voice = voice;
       _mirrorPreview = mirror;
       await _openCamera(_indexForLens(
         wantFront ? CameraLensDirection.front : CameraLensDirection.back,
@@ -318,9 +325,16 @@ class _SignPageState extends State<SignPage> with WidgetsBindingObserver {
       setState(() => _result = result);
       // Speak ONLY on `accepted`. The softmax is closed-world and names a
       // phrase for anything; `unknown` is the open-set gate rejecting it.
-      if (result.isAccepted) {
-        await _tts.setSpeechRate(0.45);
-        await _tts.speak(result.display ?? result.bestGuess);
+      //
+      // The `label != 'none'` guard is NOT redundant here, unlike on the
+      // offline path. server/inference.py returns status `accepted` with label
+      // `none` when the negative class wins confidently — so without this the
+      // app would try to speak the rejection class. `none` has no clip, so the
+      // guard is belt-and-braces, but the server bug is real and this is the
+      // side that currently has to absorb it.
+      final label = result.label;
+      if (result.isAccepted && label != null && label != 'none') {
+        await _voice?.play(label);
       }
     } on NslException catch (e) {
       if (mounted) setState(() => _error = e.toString());
@@ -364,7 +378,7 @@ class _SignPageState extends State<SignPage> with WidgetsBindingObserver {
     _client.dispose();
     _camera?.dispose();
     _encoder?.dispose();
-    _tts.stop();
+    _voice?.dispose();
     super.dispose();
   }
 
@@ -485,6 +499,12 @@ class _SignPageState extends State<SignPage> with WidgetsBindingObserver {
     return ResultBanner(
       color: color,
       title: title,
+      // Same `none` guard as playback: the server can return it as `accepted`,
+      // and showing "मलाई..." for a rejection would contradict the audio, which
+      // stays silent.
+      nepali: r.isAccepted && r.label != null && r.label != 'none'
+          ? _voice?.textFor(r.label!)
+          : null,
       body: '$top3\n${r.nFrames} frames'
           '${r.oodDistance != null ? '   distance ${r.oodDistance!.toStringAsFixed(1)}' : ''}',
     );

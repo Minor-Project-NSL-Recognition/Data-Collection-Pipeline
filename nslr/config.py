@@ -6,6 +6,7 @@ so the Python training path and the future JS browser path can be checked
 against one source of truth.
 """
 
+import json
 import os
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -13,20 +14,29 @@ RAW_DIR = os.path.join(REPO_ROOT, "data", "raw")
 PROCESSED_DIR = os.path.join(REPO_ROOT, "data", "processed")
 RESULTS_DIR = os.path.join(REPO_ROOT, "results")
 
-# Folder-safe class name -> GUI label. Phrase #6 is need_toilet by design
-# (the proposal text still says "earthquake"; the data is the source of truth).
+# Phrase wording is authored in ONE file, loaded by both languages, so the
+# Python labels and the Dart ones cannot drift. It sits under app/assets/
+# because Flutter cannot bundle an asset from above its own package root; see
+# the note inside the file. Class KEYS are frozen (the model trained on them),
+# but wording is free to change here alone.
+PHRASES_PATH = os.path.join(REPO_ROOT, "app", "assets", "phrases.json")
+with open(PHRASES_PATH, encoding="utf-8") as _fh:
+    PHRASES = json.load(_fh)["phrases"]
+
+# Folder-safe class name -> GUI label, derived rather than declared. Kept in the
+# historic "N. text (Category)" packed form that demo_ui.split_label, the
+# server's `display` field and record.py's radio buttons all already parse.
+# Phrase #6 is need_toilet by design (the proposal text still says "earthquake";
+# the data is the source of truth). The 7th, `none`, is the open-set negative
+# class -- rest, random motion, partial/mixed gestures. The pipeline ignores it
+# until it has clips, then trains it as a real class.
 CLASSES = {
-    "cant_breathe":     "1. I can't breathe (Medical)",
-    "building_on_fire": "2. The building is on fire (Fire)",
-    "call_police":      "3. Call the police (Crime)",
-    "need_ambulance":   "4. I need an ambulance (Medical)",
-    "help_danger":      "5. Help me / I am in danger (Generic)",
-    "need_toilet":      "6. I need to go to the toilet (Basic need)",
-    # Optional 7th "negative" class for open-set training: rest, random motion,
-    # partial/mixed gestures. The pipeline ignores it until it has clips, then
-    # trains it as a real class. Record into it to teach the model "not a sign".
-    "none":             "7. Unknown / none of the above (negatives)",
+    key: f"{p['order']}. {p['en']} ({p['category']})" for key, p in PHRASES.items()
 }
+
+# Folder-safe class name -> Nepali phrase. `none` maps to None, never a string:
+# a rejected sign has nothing to display and nothing to speak.
+NEPALI = {key: p["ne"] for key, p in PHRASES.items()}
 
 POSE_LANDMARKS = 33
 HAND_LANDMARKS = 21

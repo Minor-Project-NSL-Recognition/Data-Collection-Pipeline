@@ -3,7 +3,7 @@ import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_tts/flutter_tts.dart';
+import 'nepali_voice.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'landmarker.dart';
@@ -52,7 +52,7 @@ class _LocalSignPageState extends State<LocalSignPage>
   RgbaConverter? _converter;
   final _landmarker = Landmarker();
   LocalRecognizer? _recognizer;
-  final _tts = FlutterTts();
+  NepaliVoice? _voice;
 
   List<CameraDescription> _cameras = const [];
   int _cameraIndex = 0;
@@ -145,15 +145,21 @@ class _LocalSignPageState extends State<LocalSignPage>
       final converter = await RgbaConverter.spawn();
       final recognizer = await LocalRecognizer.load();
       await _landmarker.init();
+      // Decoded here rather than on first use, so the first recognised sign of
+      // a session speaks as fast as the rest. Keyed off the model's own class
+      // list, so a clip can never be preloaded for a class that cannot occur.
+      final voice = await NepaliVoice.load(recognizer.classNames);
 
       if (!mounted) {
         converter.dispose();
         recognizer.dispose();
+        await voice.dispose();
         return;
       }
       _cameras = cameras;
       _converter = converter;
       _recognizer = recognizer;
+      _voice = voice;
       _mirrorPreview = mirror;
       await _openCamera(_indexForLens(
         wantFront ? CameraLensDirection.front : CameraLensDirection.back,
@@ -444,9 +450,13 @@ class _LocalSignPageState extends State<LocalSignPage>
 
       // Speak ONLY on `accepted`. Everything else is the model declining to
       // answer, and announcing a guess it rejected would be worse than silence.
-      if (result.isAccepted) {
-        await _tts.setSpeechRate(0.45);
-        await _tts.speak(result.display ?? result.bestGuess);
+      //
+      // Keyed on `label`, the class key, not on `display`: the audio file IS
+      // the mapping, so there is no label string to mistranslate. `label` is
+      // non-null exactly when accepted, and `none` never reaches accepted.
+      final label = result.label;
+      if (result.isAccepted && label != null) {
+        await _voice?.play(label);
       }
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
@@ -478,7 +488,7 @@ class _LocalSignPageState extends State<LocalSignPage>
     _converter?.dispose();
     _recognizer?.dispose();
     _landmarker.close();
-    _tts.stop();
+    _voice?.dispose();
     super.dispose();
   }
 
@@ -626,6 +636,7 @@ class _LocalSignPageState extends State<LocalSignPage>
     return ResultBanner(
       color: color,
       title: title,
+      nepali: r.displayNe,
       body: '$top3\n${r.nFrames}'
           '${r.framesUsed != r.nFrames ? '->${r.framesUsed}' : ''}'
           ' frames · ${r.standardize} · ${r.inferenceMs}ms'
