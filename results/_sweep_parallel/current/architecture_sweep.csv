@@ -1,0 +1,2 @@
+name,lstm1,lstm2,dense,dropout,rnn,n_params,mean_accuracy,std_accuracy,mean_epochs
+current,64,32,32,0.3,lstm,192007,0.9610863095238096,0.024362873277117655,42.5

@@ -10,7 +10,7 @@
   ],
   "seq_len": 146,
   "confidence_threshold": 0.75,
-  "ood_threshold": 14.165496334364558,
+  "ood_threshold": 14.933499792763273,
   "ood_percentile": 99.0,
   "ood_stats": "ood_stats.npz",
   "tflite": "model.tflite",
