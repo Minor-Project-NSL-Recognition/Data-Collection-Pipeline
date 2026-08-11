@@ -160,10 +160,19 @@ def main():
     p.add_argument("--candidates", nargs="+", default=list(CANDIDATES),
                    help="subset of candidate names to run (default: all)")
     p.add_argument("--deterministic", action=argparse.BooleanOptionalAction, default=True)
+    p.add_argument("--threads", type=int, default=0,
+                   help="cap TensorFlow's intra-op thread pool (0 = let TF use every core). "
+                        "Only useful when several sweeps share one machine, as "
+                        "scripts/sweep_parallel.py does -- TF ignores OMP_NUM_THREADS and "
+                        "TF_NUM_INTRAOP_THREADS, so the cap has to be set in-process.")
     a = p.parse_args()
 
     import random
     import tensorflow as tf
+    # Must happen before any op runs, i.e. before load_processed/model building.
+    if a.threads:
+        tf.config.threading.set_intra_op_parallelism_threads(a.threads)
+        tf.config.threading.set_inter_op_parallelism_threads(2)
     random.seed(SEED)
     np.random.seed(SEED)
     tf.random.set_seed(SEED)
