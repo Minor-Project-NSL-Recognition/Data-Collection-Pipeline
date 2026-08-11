@@ -11,8 +11,9 @@ dependencies:
     sdk: flutter
   cupertino_icons: ^1.0.8
   camera: ^0.11.0+2           # image stream -> raw frames
-  web_socket_channel: ^3.0.1  # /ws/stream
-  image: ^4.3.0               # YUV420 -> JPEG (runs in an isolate)
+  web_socket_channel: ^3.0.1  # /ws/stream (server mode only)
+  image: ^4.3.0               # YUV420 -> JPEG (server mode only)
+  tflite_flutter: ^0.11.0     # on-device BiLSTM — the offline path
   flutter_tts: ^4.2.0         # speaks the recognized phrase
   shared_preferences: ^2.3.3  # remembers the server URL between runs
 
@@ -23,7 +24,16 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    # Everything the offline path needs. ~18 MB, dominated by the two MediaPipe
+    # bundles; regenerate the three model files with:
+    #   python scripts/train_model.py && python scripts/export_tflite.py
+    #   cp results/{model.tflite,ood.json,model_meta.json} app/assets/models/
+    - assets/models/model.tflite               # BiLSTM: softmax + 32-d embedding
+    - assets/models/model_meta.json            # class_names, seq_len, thresholds
+    - assets/models/ood.json                   # Mahalanobis prototypes + threshold
+    - assets/models/pose_landmarker_full.task  # 33 pose landmarks
+    - assets/models/hand_landmarker.task       # 21 landmarks per hand
   # Drop pre-recorded Nepali audio here later and swap flutter_tts for
   # just_audio -- device TTS rarely has a usable ne-NP voice.
-  # assets:
   #   - assets/audio/

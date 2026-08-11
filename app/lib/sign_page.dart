@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'frame_encoder.dart';
 import 'nsl_client.dart';
+import 'widgets.dart';
 
 /// Which lens the user last chose. Front is the default because the signer is
 /// usually alone; back is for when someone else holds the phone.
@@ -30,11 +31,17 @@ class SignPage extends StatefulWidget {
     super.key,
     required this.serverUrl,
     required this.onEditServer,
+    required this.onUseOffline,
     this.apiKey,
   });
   final String serverUrl;
   final String? apiKey;
   final VoidCallback onEditServer;
+
+  /// Switch to on-device inference. Worth reaching for whenever the network is
+  /// the thing that is broken — which, for this app's actual use case, is the
+  /// expected state rather than the exception.
+  final VoidCallback onUseOffline;
 
   @override
   State<SignPage> createState() => _SignPageState();
@@ -366,8 +373,13 @@ class _SignPageState extends State<SignPage> with WidgetsBindingObserver {
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
-        title: const Text('NSL Recognition'),
+        title: const Text('NSL — Server'),
         actions: [
+          IconButton(
+            tooltip: 'Switch to offline (on-device) recognition',
+            icon: const Icon(Icons.offline_bolt_outlined),
+            onPressed: _recording ? null : widget.onUseOffline,
+          ),
           IconButton(
             tooltip: _mirrorPreview ? 'Preview: mirrored' : 'Preview: as others see you',
             icon: Icon(_mirrorPreview ? Icons.flip : Icons.flip_outlined),
@@ -389,9 +401,9 @@ class _SignPageState extends State<SignPage> with WidgetsBindingObserver {
         ],
       ),
       body: _fatal != null
-          ? _CenteredMessage(icon: Icons.error_outline, text: _fatal!)
+          ? CenteredMessage(icon: Icons.error_outline, text: _fatal!)
           : _initialising
-              ? const _CenteredMessage(icon: Icons.hourglass_empty, text: 'Starting camera…')
+              ? const CenteredMessage(icon: Icons.hourglass_empty, text: 'Starting camera…')
               : Column(
                   children: [
                     Expanded(child: _preview()),
@@ -406,7 +418,7 @@ class _SignPageState extends State<SignPage> with WidgetsBindingObserver {
   Widget _preview() {
     final camera = _camera;
     if (camera == null || !camera.value.isInitialized) {
-      return const _CenteredMessage(
+      return const CenteredMessage(
           icon: Icons.cameraswitch, text: 'Switching camera…');
     }
     // Preview orientation only, toggled from the app bar and remembered.
@@ -432,16 +444,16 @@ class _SignPageState extends State<SignPage> with WidgetsBindingObserver {
         spacing: 8,
         runSpacing: 4,
         children: [
-          _Chip('server', _connected, onTap: _connected ? null : _connect),
-          _Chip('pose', _pose),
-          _Chip('hands', _hands),
-          _Info('frames', '$_kept'),
-          if (fps != null) _Info('fps', fps.toStringAsFixed(1)),
+          StatusChip('server', _connected, onTap: _connected ? null : _connect),
+          StatusChip('pose', _pose),
+          StatusChip('hands', _hands),
+          InfoChip('frames', '$_kept'),
+          if (fps != null) InfoChip('fps', fps.toStringAsFixed(1)),
           // enc is the whole client-side cost of one frame. If it is near the
           // 62 ms budget, the phone is the limit and maxWidth is the lever.
-          if (_encodeMs > 0) _Info('enc', '${_encodeMs}ms'),
-          if (_sizeLabel != null) _Info('src', _sizeLabel!),
-          _Info('lens', _isFront ? 'front' : 'back'),
+          if (_encodeMs > 0) InfoChip('enc', '${_encodeMs}ms'),
+          if (_sizeLabel != null) InfoChip('src', _sizeLabel!),
+          InfoChip('lens', _isFront ? 'front' : 'back'),
         ],
       ),
     );
@@ -449,14 +461,14 @@ class _SignPageState extends State<SignPage> with WidgetsBindingObserver {
 
   Widget _resultPanel() {
     if (_error != null) {
-      return _Banner(color: Colors.red.shade900, title: 'Error', body: _error!);
+      return ResultBanner(color: Colors.red.shade900, title: 'Error', body: _error!);
     }
     if (_finishing) {
-      return const _Banner(color: Colors.blueGrey, title: 'Recognising…', body: '');
+      return const ResultBanner(color: Colors.blueGrey, title: 'Recognising…', body: '');
     }
     final r = _result;
     if (r == null) {
-      return const _Banner(
+      return const ResultBanner(
         color: Colors.black54,
         title: 'Ready',
         body: 'Tap the button, perform one sign, then tap again.',
@@ -470,7 +482,7 @@ class _SignPageState extends State<SignPage> with WidgetsBindingObserver {
     final top3 = r.top3
         .map((g) => '${g.label} ${(g.confidence * 100).round()}%')
         .join('   ');
-    return _Banner(
+    return ResultBanner(
       color: color,
       title: title,
       body: '$top3\n${r.nFrames} frames'
@@ -522,98 +534,6 @@ class _SignPageState extends State<SignPage> with WidgetsBindingObserver {
   }
 }
 
-class _Chip extends StatelessWidget {
-  const _Chip(this.label, this.on, {this.onTap});
-  final String label;
-  final bool on;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        decoration: BoxDecoration(
-          color: on ? Colors.green.shade700 : Colors.red.shade900,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 12)),
-      ),
-    );
-  }
-}
-
-class _Info extends StatelessWidget {
-  const _Info(this.label, this.value);
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.grey.shade800,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Text('$label $value',
-          style: const TextStyle(color: Colors.white70, fontSize: 12)),
-    );
-  }
-}
-
-class _Banner extends StatelessWidget {
-  const _Banner({required this.color, required this.title, required this.body});
-  final Color color;
-  final String title;
-  final String body;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      color: color,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title,
-              style: const TextStyle(
-                  color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
-          if (body.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text(body,
-                  style: const TextStyle(color: Colors.white70, fontSize: 12)),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class _CenteredMessage extends StatelessWidget {
-  const _CenteredMessage({required this.icon, required this.text});
-  final IconData icon;
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: Colors.white54, size: 48),
-            const SizedBox(height: 12),
-            Text(text,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white70)),
-          ],
-        ),
-      ),
-    );
-  }
-}
+// The telemetry chips, result banner and centred message now live in
+// widgets.dart, shared with local_sign_page.dart so both paths present
+// identically.
