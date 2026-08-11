@@ -158,9 +158,15 @@ def plot_loso_bar(test_signers, fold_accuracy, path, title):
     ax.set_xticklabels(test_signers, rotation=45, ha="right")
     ax.set_ylim(0, 1)
     ax.set_ylabel("Accuracy")
-    ax.set_title(title)
-    for i, v in enumerate(accs):
-        ax.text(i, v + 0.01, f"{v:.2f}", ha="center", va="bottom", fontsize=9)
+    ax.set_title(title, pad=12)
+    # Labels go inside the bar tops. Above the bars they run into the title at
+    # the accuracies these folds actually hit (0.90-1.00), and buying headroom
+    # instead would spend a chunk of the axis on a range no fold ever reaches.
+    ax.bar_label(bars, fmt="%.2f", padding=-18, color="white", fontsize=9,
+                 fontweight="bold")
+    ax.set_axisbelow(True)
+    ax.grid(axis="y", alpha=0.3)
+    ax.spines[["top", "right"]].set_visible(False)
     fig.tight_layout()
     fig.savefig(path, dpi=120)
     plt.close(fig)

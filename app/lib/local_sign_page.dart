@@ -86,6 +86,34 @@ class _LocalSignPageState extends State<LocalSignPage>
   /// indistinguishable from an idle camera.
   String? _frameError;
   int _frameErrors = 0;
+
+  /// Filename of the last raw clip written to external files, shown so it can be
+  /// matched up with what `adb pull` retrieves.
+  String? _savedClip;
+
+  /// Dimensions of the upright frame the landmarks were extracted from. Needed to
+  /// undo the aspect mismatch, since the correction depends on height/width.
+  int? _frameW;
+  int? _frameH;
+
+  /// The two on-device corrections, individually switchable at runtime.
+  ///
+  /// Both were derived from measurements on dumped clips, and both changed
+  /// behaviour in ways that were hard to attribute without being able to isolate
+  /// them. Toggling on the device beats a rebuild per hypothesis: tap, sign, read
+  /// the answer. Persisted so a chosen configuration survives a restart.
+  bool _fixAspect = true;
+  bool _fixResample = true;
+
+  /// Whether the Mahalanobis distance may REJECT a sign. Off by default: measured
+  /// on-device distances (20-27) sit past the largest training distance (20.8), and
+  /// no threshold separates real signs from non-signs there. Left toggleable so the
+  /// decision stays visible rather than buried.
+  bool _enforceOod = false;
+
+  static const _prefsFixAspect = 'fix_aspect';
+  static const _prefsFixResample = 'fix_resample';
+  static const _prefsEnforceOod = 'enforce_ood';
   DateTime? _startedAt;
   DateTime _lastFrameAt = DateTime.fromMillisecondsSinceEpoch(0);
   int _convertMs = 0;
@@ -109,6 +137,9 @@ class _LocalSignPageState extends State<LocalSignPage>
       final prefs = await SharedPreferences.getInstance();
       final wantFront = prefs.getBool(_prefsUseFront) ?? true;
       final mirror = prefs.getBool(_prefsMirrorPreview) ?? false;
+      _fixAspect = prefs.getBool(_prefsFixAspect) ?? true;
+      _fixResample = prefs.getBool(_prefsFixResample) ?? true;
+      _enforceOod = prefs.getBool(_prefsEnforceOod) ?? false;
 
       // Both are slow and independent: ~18 MB of model bundles between them.
       final converter = await RgbaConverter.spawn();
@@ -179,6 +210,32 @@ class _LocalSignPageState extends State<LocalSignPage>
       _camera = controller;
       _cameraIndex = index;
     });
+  }
+
+  /// Flip one of the correction toggles. Blocked mid-recording so a clip is never
+  /// captured under one configuration and scored under another.
+  Future<void> _toggleFix(String which) async {
+    if (_recording) return;
+    late final String key;
+    late final bool value;
+    setState(() {
+      switch (which) {
+        case 'aspect':
+          _fixAspect = !_fixAspect;
+          key = _prefsFixAspect;
+          value = _fixAspect;
+        case 'resample':
+          _fixResample = !_fixResample;
+          key = _prefsFixResample;
+          value = _fixResample;
+        case 'ood':
+          _enforceOod = !_enforceOod;
+          key = _prefsEnforceOod;
+          value = _enforceOod;
+      }
+    });
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(key, value);
   }
 
   Future<void> _toggleMirror() async {
@@ -281,6 +338,8 @@ class _LocalSignPageState extends State<LocalSignPage>
       if (frame == null || !_recording) return;
       _converted++;
       _convertMs = frame.millis;
+      _frameW = frame.width;
+      _frameH = frame.height;
       _sizeLabel = '${frame.srcWidth}x${frame.srcHeight}'
           '>${frame.width}x${frame.height}';
 
@@ -349,7 +408,37 @@ class _LocalSignPageState extends State<LocalSignPage>
       // The clip is normalized in place, so hand over a copy and clear ours.
       final clip = List<Float32List>.from(_clip);
       _clip.clear();
-      final result = recognizer.predict(clip);
+
+      // Dump the RAW clip before predict() normalizes it in place. Always on:
+      // these are ~80 KB and they are the only way to compare what the phone
+      // actually fed the model against what live_demo.py feeds it. record.py's
+      // landmarks were inspectable; the phone's were not, which is precisely
+      // what made on-device disagreement so hard to diagnose.
+      final raw = clip.map((f) => Float32List.fromList(f)).toList();
+      final stamp = DateTime.now()
+          .toIso8601String()
+          .replaceAll(':', '-')
+          .replaceAll('.', '-');
+      _landmarker.saveClip(raw, 'clip_$stamp.f32').then((path) {
+        if (mounted) setState(() => _savedClip = path);
+      }).catchError((Object e) {
+        debugPrint('clip dump failed: $e');
+        return null;
+      });
+
+      // Duration and frame size are what let predict() undo the two measured
+      // on-device distortions: a capture rate the phone could not sustain, and
+      // the portrait/landscape aspect mismatch.
+      final durationSec = _startedAt == null
+          ? null
+          : DateTime.now().difference(_startedAt!).inMilliseconds / 1000.0;
+      final result = recognizer.predict(
+        clip,
+        durationSec: _fixResample ? durationSec : null,
+        frameWidth: _fixAspect ? _frameW : null,
+        frameHeight: _fixAspect ? _frameH : null,
+        enforceOodGate: _enforceOod,
+      );
       if (!mounted) return;
       setState(() => _result = result);
 
@@ -458,7 +547,6 @@ class _LocalSignPageState extends State<LocalSignPage>
 
   Widget _telemetry() {
     final fps = _fps;
-    final r = _recognizer;
     return Container(
       color: Colors.grey.shade900,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -467,7 +555,16 @@ class _LocalSignPageState extends State<LocalSignPage>
         runSpacing: 4,
         children: [
           const StatusChip('offline', true),
-          StatusChip('gate', r?.hasOpenSetGate ?? false),
+          // "gate" now reports whether the distance may REJECT, not merely whether
+          // stats were loaded — the loaded-but-unused state was misleading.
+          StatusChip('gate', _enforceOod,
+              onTap: _recording ? null : () => _toggleFix('ood')),
+          // Tap either to turn that correction off, then repeat the sign. Four
+          // combinations, so whichever one behaves is the answer.
+          StatusChip('aspect', _fixAspect,
+              onTap: _recording ? null : () => _toggleFix('aspect')),
+          StatusChip('resample', _fixResample,
+              onTap: _recording ? null : () => _toggleFix('resample')),
           StatusChip('pose', _pose),
           StatusChip('hands', _hands),
           InfoChip('frames', '$_seen'),
@@ -523,11 +620,17 @@ class _LocalSignPageState extends State<LocalSignPage>
     final top3 = r.top3
         .map((g) => '${g.label} ${(g.confidence * 100).round()}%')
         .join('   ');
+    final dumped = _savedClip == null
+        ? ''
+        : '\nsaved ${_savedClip!.split('/').last}';
     return ResultBanner(
       color: color,
       title: title,
-      body: '$top3\n${r.nFrames} frames · ${r.standardize} · ${r.inferenceMs}ms'
-          '${r.oodDistance != null ? ' · distance ${r.oodDistance!.toStringAsFixed(1)}' : ''}',
+      body: '$top3\n${r.nFrames}'
+          '${r.framesUsed != r.nFrames ? '->${r.framesUsed}' : ''}'
+          ' frames · ${r.standardize} · ${r.inferenceMs}ms'
+          '${r.oodDistance != null ? ' · distance ${r.oodDistance!.toStringAsFixed(1)}' : ''}'
+          '$dumped',
     );
   }
 

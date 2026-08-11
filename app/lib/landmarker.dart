@@ -124,6 +124,27 @@ class Landmarker {
   /// state, matching `record.py` holding one Holistic graph open across clips.
   Future<void> reset() => _channel.invokeMethod<void>('reset');
 
+  /// Write a raw clip to external files and return its on-device path.
+  ///
+  /// Diagnostics only. `record.py` saved landmarks so they could be inspected
+  /// later; the phone never did, which is why on-device disagreement with the
+  /// Python pipeline has been so hard to pin down. Pull one with:
+  ///
+  ///   adb pull /sdcard/Android/data/np.edu.nsl.nsl_app/files/clips
+  ///   python scripts/inspect_device_clip.py `clips/<file>.f32`
+  Future<String?> saveClip(List<Float32List> clip, String name) async {
+    final flat = Float32List(clip.length * Nslr.featureDim);
+    for (var t = 0; t < clip.length; t++) {
+      flat.setRange(t * Nslr.featureDim, (t + 1) * Nslr.featureDim, clip[t]);
+    }
+    return _channel.invokeMethod<String>('saveClip', {
+      // Uint8List view over the same bytes — no copy, and the codec sends it as
+      // a byte array, which every Flutter version encodes identically.
+      'bytes': flat.buffer.asUint8List(flat.offsetInBytes, flat.lengthInBytes),
+      'name': name,
+    });
+  }
+
   Future<void> close() async {
     if (!_ready) return;
     _ready = false;

@@ -5,7 +5,11 @@ press SPACE to start a sign, SPACE again to stop and classify. This is more
 reliable than continuous prediction because the model expects one whole sign per
 input, and there is no "idle/nothing" class.
 
-Controls:  SPACE = record/stop+classify   |   R = clear result   |   Q / Esc = quit
+Controls:  SPACE = record/stop+classify  |  R = reset  |  L = landmarks
+           F = fullscreen  |  Q / Esc = quit
+
+The window itself is drawn by scripts/demo_ui.py — camera panel on the left,
+result sidebar on the right — so it is presentable in front of an audience.
 
 Needs a model from train_model.py. Run:
     python scripts/train_model.py
@@ -20,19 +24,22 @@ import sys
 import time
 
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(_HERE))
+sys.path.insert(0, _HERE)               # demo_ui.py lives next to this script
 
 import cv2
 import mediapipe as mp
 import numpy as np
 
+import demo_ui
 from nslr import config as C
 from nslr import ood
 from nslr.landmarks import extract_frame_vector
 from nslr.preprocess import normalize_clip, standardize_length
 
 
-WINDOW = "NSL live tester"
+WINDOW = "NSL Recognition"
 
 
 def parse_size(text, flag):
@@ -44,26 +51,6 @@ def parse_size(text, flag):
         return w, h
     except ValueError:
         raise SystemExit(f"{flag} expects WIDTHxHEIGHT, e.g. 1280x720 (got {text!r})")
-
-
-def draw_panel(frame, lines, org=(10, 10), scale=0.6):
-    """Draw a translucent black box with white text lines at the top-left.
-    Everything is derived from `scale` so the panel keeps its proportions at any
-    capture resolution (scale=0.6 reproduces the original 640-wide layout)."""
-    font = cv2.FONT_HERSHEY_SIMPLEX
-    thick = max(1, round(scale * 1.6))
-    pad, gap = round(scale * 13), round(scale * 17)
-    sizes = [cv2.getTextSize(t, font, scale, thick)[0] for t, _ in lines]
-    w = max((s[0] for s in sizes), default=0) + 2 * pad
-    h = sum(s[1] + gap for s in sizes) + pad
-    x, y = org
-    overlay = frame.copy()
-    cv2.rectangle(overlay, (x, y), (x + w, y + h), (0, 0, 0), -1)
-    cv2.addWeighted(overlay, 0.55, frame, 0.45, 0, frame)
-    cy = y + pad + round(scale * 20)
-    for (text, color) in lines:
-        cv2.putText(frame, text, (x + pad, cy), font, scale, color, thick, cv2.LINE_AA)
-        cy += cv2.getTextSize(text, font, scale, thick)[0][1] + gap
 
 
 def classify(predictor, ood_stats, buffer, seq_len, class_names):
@@ -82,6 +69,32 @@ def classify(predictor, ood_stats, buffer, seq_len, class_names):
     return class_names[int(order[0])], float(probs[order[0]]), top3, dist
 
 
+def make_result(predictor, ood_stats, buffer, seq_len, class_names, threshold):
+    """Classify `buffer` and package the answer the way the sidebar renders it.
+
+    `state` drives every colour and heading in the UI, so the decision order —
+    open-set gate first, then the softmax threshold — lives here and nowhere
+    else."""
+    if len(buffer) < 5:
+        return {"state": "short", "phrase": "Clip too short", "category": "",
+                "note": f"{len(buffer)} frames captured - need at least 5",
+                "conf": None, "top3": [], "dist": None, "t": time.time()}
+
+    key_name, conf, top3, dist = classify(predictor, ood_stats, buffer, seq_len, class_names)
+    phrase, category = demo_ui.split_label(key_name, C.CLASSES.get(key_name, key_name))
+    common = {"top3": top3, "dist": dist, "conf": conf, "category": category,
+              "t": time.time()}
+
+    if ood_stats is not None and dist > ood_stats[2]:
+        return {"state": "ood", "phrase": "Unknown sign",
+                "note": "does not match any of the known phrases", **common}
+    if conf < threshold:
+        return {"state": "low", "phrase": phrase,
+                "note": f"below the {threshold:.0%} confidence threshold", **common}
+    return {"state": "ok", "phrase": phrase,
+            "note": category or "recognised", **common}
+
+
 def main():
     p = argparse.ArgumentParser(description="Live webcam tester for the NSL model.")
     p.add_argument("--results", default=C.RESULTS_DIR)
@@ -92,12 +105,15 @@ def main():
                    help="override the open-set reject distance (higher = more lenient)")
     p.add_argument("--no-ood", action="store_true",
                    help="disable open-set rejection entirely (accept whatever softmax picks)")
-    p.add_argument("--cam-res", default=None, metavar="WxH",
-                   help="capture resolution to request from the camera, e.g. 1280x720 "
-                        "(default: whatever the camera gives)")
+    p.add_argument("--cam-res", default="1280x720", metavar="WxH",
+                   help="capture resolution to request from the camera (default: "
+                        "1280x720). Landmark extraction costs more at higher "
+                        "resolutions and short clips are zero-padded rather than "
+                        "resampled, so if the fps readout goes amber, drop to "
+                        "640x480. Pass 'auto' to take whatever the camera gives.")
     p.add_argument("--window-size", default=None, metavar="WxH",
-                   help="initial window size, e.g. 1600x900 (default: match the frame). "
-                        "The window is drag-resizable either way.")
+                   help="initial window size, e.g. 1600x900 (default: fit the "
+                        "composed layout). The window is drag-resizable either way.")
     a = p.parse_args()
 
     model_path = os.path.join(a.results, "model.keras")
@@ -132,7 +148,7 @@ def main():
     cap = cv2.VideoCapture(a.cam)
     if not cap.isOpened():
         raise SystemExit(f"Could not open camera {a.cam}")
-    want = parse_size(a.cam_res, "--cam-res") if a.cam_res else None
+    want = None if a.cam_res in (None, "auto") else parse_size(a.cam_res, "--cam-res")
     if want:
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, want[0])
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, want[1])
@@ -142,12 +158,20 @@ def main():
     frame_h, frame_w = probe.shape[:2]
     if want and want != (frame_w, frame_h):
         print(f"Camera refused {want[0]}x{want[1]}; using {frame_w}x{frame_h}.")
-    hud_scale = 0.6 * frame_w / 640          # keep the overlay proportional at any resolution
 
-    # WINDOW_NORMAL, not imshow's implicit WINDOW_AUTOSIZE, is what makes it resizable.
-    cv2.namedWindow(WINDOW, cv2.WINDOW_NORMAL)
-    win = parse_size(a.window_size, "--window-size") if a.window_size else (frame_w, frame_h)
+    labels = {k: demo_ui.split_label(k, C.CLASSES.get(k, k)) for k in class_names}
+    ui = demo_ui.Dashboard(frame_w, frame_h, labels=labels, seq_len=seq_len,
+                           threshold=threshold, cam_index=a.cam)
+    if not ui.type.truetype:
+        print("No TrueType font found (or Pillow missing) — falling back to the "
+              "OpenCV font. Layout is unchanged.")
+
+    # WINDOW_NORMAL, not imshow's implicit WINDOW_AUTOSIZE, is what makes it
+    # resizable; KEEPRATIO stops a careless drag from stretching the video.
+    cv2.namedWindow(WINDOW, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
+    win = parse_size(a.window_size, "--window-size") if a.window_size else ui.window_size()
     cv2.resizeWindow(WINDOW, win[0], win[1])
+    fullscreen = False
 
     holistic = mp.solutions.holistic.Holistic(
         min_detection_confidence=0.5, min_tracking_confidence=0.5, model_complexity=1)
@@ -155,8 +179,8 @@ def main():
     mp_h = mp.solutions.holistic
 
     recording, buffer, rec_start = False, [], 0.0
-    result_line = ("Press SPACE to record a sign", (200, 200, 200))
-    top3_lines = []
+    result, show_landmarks = None, True
+    fps, last = 0.0, time.time()
 
     while True:
         ok, frame = cap.read()
@@ -168,53 +192,45 @@ def main():
         results = holistic.process(rgb)
         rgb.flags.writeable = True
 
-        drawing.draw_landmarks(frame, results.pose_landmarks, mp_h.POSE_CONNECTIONS,
-                               landmark_drawing_spec=styles.get_default_pose_landmarks_style())
-        for hand in (results.left_hand_landmarks, results.right_hand_landmarks):
-            drawing.draw_landmarks(frame, hand, mp_h.HAND_CONNECTIONS,
-                                   landmark_drawing_spec=styles.get_default_hand_landmarks_style())
+        if show_landmarks:
+            drawing.draw_landmarks(frame, results.pose_landmarks, mp_h.POSE_CONNECTIONS,
+                                   landmark_drawing_spec=styles.get_default_pose_landmarks_style())
+            for hand in (results.left_hand_landmarks, results.right_hand_landmarks):
+                drawing.draw_landmarks(frame, hand, mp_h.HAND_CONNECTIONS,
+                                       landmark_drawing_spec=styles.get_default_hand_landmarks_style())
 
         if recording:
             vec, _ = extract_frame_vector(results)
             buffer.append(vec)
 
-        panel = [("SPACE record/stop   R clear   Q quit", (180, 180, 180))]
-        if recording:
-            panel.append((f"REC  {len(buffer)} frames  {time.time() - rec_start:0.1f}s", (0, 0, 255)))
-        panel.append(result_line)
-        panel.extend(top3_lines)
-        draw_panel(frame, panel, scale=hud_scale)
+        now = time.time()
+        dt = now - last
+        last = now
+        if dt > 0:                                       # smoothed, or it flickers
+            fps = 1.0 / dt if fps == 0 else fps * 0.9 + 0.1 / dt
 
-        cv2.imshow(WINDOW, frame)
+        cv2.imshow(WINDOW, ui.render(
+            frame, recording=recording, rec_frames=len(buffer),
+            rec_time=now - rec_start if recording else 0.0,
+            result=result, fps=fps, now=now))
         key = cv2.waitKey(1) & 0xFF
 
         if key == ord(" "):
             if not recording:
                 recording, buffer, rec_start = True, [], time.time()
-                result_line = ("Recording... SPACE to stop", (0, 220, 220))
-                top3_lines = []
+                result = None
             else:
                 recording = False
-                if len(buffer) < 5:
-                    result_line = (f"Too short ({len(buffer)} frames)", (0, 165, 255))
-                    top3_lines = []
-                else:
-                    key_name, conf, top3, dist = classify(predictor, ood_stats, buffer, seq_len, class_names)
-                    label = C.CLASSES.get(key_name, key_name)
-                    is_ood = ood_stats is not None and dist > ood_stats[2]
-                    if is_ood:
-                        result_line = (f"Unknown sign — rejected (dist {dist:.1f})", (0, 0, 255))
-                    elif conf >= threshold:
-                        result_line = (f"{label}   {conf:.0%}", (0, 255, 0))
-                    else:
-                        result_line = (f"Not confident (best: {key_name} {conf:.0%})", (0, 165, 255))
-                    dtxt = f"  [dist {dist:.1f}]" if dist is not None else ""
-                    top3_lines = [(f"   {k}: {c:.0%}", (200, 200, 200)) for k, c in top3]
-                    if dtxt:
-                        top3_lines.append((dtxt.strip(), (150, 150, 150)))
+                result = make_result(predictor, ood_stats, buffer, seq_len,
+                                     class_names, threshold)
         elif key in (ord("r"), ord("R")):
-            result_line = ("Press SPACE to record a sign", (200, 200, 200))
-            top3_lines = []
+            result = None
+        elif key in (ord("l"), ord("L")):
+            show_landmarks = not show_landmarks
+        elif key in (ord("f"), ord("F")):
+            fullscreen = not fullscreen
+            cv2.setWindowProperty(WINDOW, cv2.WND_PROP_FULLSCREEN,
+                                  cv2.WINDOW_FULLSCREEN if fullscreen else cv2.WINDOW_NORMAL)
         elif key in (ord("q"), ord("Q"), 27):
             break
 

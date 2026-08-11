@@ -38,6 +38,7 @@ class LocalResult {
     required this.top3,
     required this.oodDistance,
     required this.nFrames,
+    required this.framesUsed,
     required this.standardize,
     required this.inferenceMs,
   });
@@ -50,7 +51,15 @@ class LocalResult {
   final String bestGuess;
   final List<Guess> top3;
   final double? oodDistance;
+
+  /// Frames the camera actually produced.
   final int nFrames;
+
+  /// Frames fed to the model after duration-based resampling. When this is much
+  /// larger than [nFrames], the phone under-ran the target capture rate and the
+  /// clip had to be stretched back to the training timescale.
+  final int framesUsed;
+
   final String standardize;
   final int inferenceMs;
 
@@ -193,15 +202,60 @@ class LocalRecognizer {
   /// them — the same contract as `Predictor.predict`'s input.
   ///
   /// Mutates [clip] in place while normalizing; the caller must not reuse it.
-  LocalResult predict(List<Float32List> clip) {
+  ///
+  /// [durationSec] is the wall-clock length of the recording. Supplying it is
+  /// strongly recommended: it lets the clip be resampled to the frame rate the
+  /// model was trained at, which is what stops an under-performing phone from
+  /// producing a clip the model reads as a much shorter, partial sign.
+  ///
+  /// [frameWidth]/[frameHeight] are the dimensions the landmarks were extracted
+  /// from, used to undo the portrait/landscape aspect mismatch.
+  /// [enforceOodGate] decides whether the Mahalanobis distance may REJECT a sign.
+  /// It defaults to false, which is a deliberate deployment decision rather than
+  /// laziness:
+  ///
+  /// The threshold is fitted as the p99 of *training* distances -- Holistic
+  /// landmarks, a webcam, signers the model trained on. On-device the same real
+  /// signs land at 20-27, past even the largest training distance (20.8), because
+  /// the phone extracts landmarks with MediaPipe Tasks instead. Calibrating
+  /// against measured on-device distances gives a threshold at which the gate
+  /// rejects ~3% of synthetic non-signs (best Youden J across ALL thresholds:
+  /// 0.027, where 0 is chance). It cannot separate the two populations here, so
+  /// enforcing it only produces false rejections of correct predictions.
+  ///
+  /// Negative rejection is instead handled by the trained `none` class, which is
+  /// what it was added for, and by [confidenceThreshold].
+  ///
+  /// The distance is still computed and reported -- it is useful telemetry, and
+  /// cheap (a 32x32 quadratic form once per sign).
+  LocalResult predict(
+    List<Float32List> clip, {
+    double? durationSec,
+    int? frameWidth,
+    int? frameHeight,
+    bool enforceOodGate = false,
+  }) {
     if (clip.length < 5) {
       throw ArgumentError('clip too short: ${clip.length} frames');
     }
     final started = DateTime.now();
     final rawFrames = clip.length;
 
-    normalizeClip(clip);
-    final std = standardizeLength(clip, seqLen);
+    // Both corrections operate on RAW normalized landmarks, in this order, before
+    // any of the nslr contract runs. Aspect first: it is a per-frame geometric
+    // fix, and resampling afterwards then interpolates already-correct geometry.
+    if (frameWidth != null && frameHeight != null) {
+      correctAspect(clip, frameWidth, frameHeight);
+    }
+    var work = clip;
+    var resampledTo = rawFrames;
+    if (durationSec != null && durationSec > 0) {
+      work = resampleToTrainingRate(clip, durationSec);
+      resampledTo = work.length;
+    }
+
+    normalizeClip(work);
+    final std = standardizeLength(work, seqLen);
 
     // tflite_flutter's documented path takes nested lists. Once per sign, so the
     // boxing cost is irrelevant next to the LSTM itself.
@@ -242,13 +296,15 @@ class LocalRecognizer {
     var isUnknown = false;
     final gate = ood;
     if (gate != null && _embIndex >= 0) {
+      // Always measured, only sometimes enforced.
       distance = gate.minDistance(embOut[0]);
-      isUnknown = gate.rejects(distance);
+      if (enforceOodGate) isUnknown = gate.rejects(distance);
     }
 
-    // Decision rule, in the server's order: the OOD gate WINS over confidence.
-    // A clip can be 99% "call police" by softmax and still be unknown if its
-    // embedding sits far from every prototype.
+    // Decision rule. When the OOD gate is enforced it WINS over confidence -- a
+    // clip can be 99% "call police" by softmax and still be unknown if its
+    // embedding sits far from every prototype. With the gate off (the default on
+    // device) only `none` and the confidence threshold can withhold an answer.
     //
     // The `none` class is folded into `unknown` here. It is a real trained class
     // (negatives: rest, random motion, partial signs), but treating it as an
@@ -276,6 +332,7 @@ class LocalRecognizer {
           .toList(),
       oodDistance: distance,
       nFrames: rawFrames,
+      framesUsed: resampledTo,
       standardize: std.mode,
       inferenceMs: DateTime.now().difference(started).inMilliseconds,
     );

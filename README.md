@@ -210,10 +210,19 @@ python scripts/live_demo.py                      # opens the webcam
 ```
 
 In the tester: **SPACE** to start a sign, **SPACE** again to stop and classify,
-**R** to clear, **Q**/**Esc** to quit. It's segment-based (record a whole sign,
-then predict) because the model expects one complete sign per input and has no
-"idle" class — continuous always-on prediction would be unreliable. A confidence
-threshold (default 0.75) suppresses unsure guesses.
+**R** to reset, **L** to toggle the landmark overlay, **F** for fullscreen,
+**Q**/**Esc** to quit. It's segment-based (record a whole sign, then predict)
+because the model expects one complete sign per input and has no "idle" class —
+continuous always-on prediction would be unreliable. A confidence threshold
+(default 0.75) suppresses unsure guesses.
+
+The window is laid out by `scripts/demo_ui.py` — camera on the left, a sidebar
+carrying the prediction and the top-3 on the right — so it is presentable in
+front of an audience. The open-set gate still runs; it just reports itself as
+"Unknown sign" rather than showing a Mahalanobis distance on screen. It captures at 1280x720 by default;
+**watch the fps readout in the header.** Clips shorter than `seq_len` are
+zero-padded rather than resampled, so a slow loop is an accuracy problem, not
+just a cosmetic one. If that readout turns amber, run with `--cam-res 640x480`.
 
 ### 7. Serve it to a mobile app
 

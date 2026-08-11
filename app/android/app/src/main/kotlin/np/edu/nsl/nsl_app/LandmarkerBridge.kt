@@ -14,6 +14,7 @@ import com.google.mediapipe.tasks.vision.poselandmarker.PoseLandmarkerResult
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import java.io.File
 import java.nio.ByteBuffer
 import java.util.concurrent.Executors
 import kotlin.math.hypot
@@ -121,6 +122,7 @@ class LandmarkerBridge(private val context: Context) : FlutterPlugin, MethodChan
                 timestampOffset = lastTimestamp + 1
                 result.success(null)
             }
+            "saveClip" -> handleSaveClip(call, result)
             "close" -> {
                 closeDetectors()
                 result.success(null)
@@ -411,6 +413,45 @@ class LandmarkerBridge(private val context: Context) : FlutterPlugin, MethodChan
             "rightHand" to rightPresent,
             "handednessAgrees" to handednessAgrees,
         )
+    }
+
+    /**
+     * Dump a raw landmark clip to external files, for offline comparison against
+     * the Python pipeline.
+     *
+     * The whole reason on-device failures have been hard to diagnose is that the
+     * 225-vectors the phone builds are invisible -- unlike record.py's, they were
+     * never written anywhere. This makes them inspectable with `adb pull`, so the
+     * phone's actual input can be replayed through live_demo.py's exact path.
+     *
+     * Format is deliberately dumb: little-endian float32, row-major (n_frames, 225),
+     * no header. numpy reads it with
+     *     np.frombuffer(open(p,'rb').read(), '<f4').reshape(-1, 225)
+     */
+    private fun handleSaveClip(call: MethodCall, result: MethodChannel.Result) {
+        val bytes = call.argument<ByteArray>("bytes")
+        val name = call.argument<String>("name")
+        if (bytes == null || name.isNullOrBlank()) {
+            result.error("bad_args", "bytes and name are required", null)
+            return
+        }
+        // Reject path separators rather than sanitising: this only ever receives
+        // names this app generated, so anything else is a bug worth surfacing.
+        if (name.contains('/') || name.contains('\\') || name.contains("..")) {
+            result.error("bad_args", "name must not contain a path", null)
+            return
+        }
+        try {
+            val dir = File(context.getExternalFilesDir(null), "clips")
+            if (!dir.exists() && !dir.mkdirs()) {
+                throw IllegalStateException("could not create ${dir.absolutePath}")
+            }
+            val file = File(dir, name)
+            file.writeBytes(bytes)
+            result.success(file.absolutePath)
+        } catch (e: Throwable) {
+            result.error("save_failed", e.message, null)
+        }
     }
 
     private fun closeDetectors() {
