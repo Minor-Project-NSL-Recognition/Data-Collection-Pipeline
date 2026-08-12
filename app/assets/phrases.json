@@ -1,0 +1,64 @@
+{
+  "_comment": [
+    "THE source of truth for phrase wording, in both languages. Python reads this",
+    "file via nslr/config.py; Dart loads it as a bundled asset in LocalRecognizer.",
+    "Neither language declares the strings itself, so they cannot drift apart.",
+    "",
+    "It lives under app/assets/ for one reason only: Flutter cannot bundle an asset",
+    "from above its package root, so a copy at the repo root would have to be kept",
+    "in sync with this one -- which is the exact failure this file exists to remove.",
+    "",
+    "KEY ORDER IS SIGNIFICANT. record.py builds its class folders and its radio",
+    "buttons from it, and parity_spike.py indexes into it. Keep it as-is.",
+    "",
+    "`ne` is null for `none` on purpose: a rejected sign must have no Nepali text",
+    "to show and no audio to play. Same reason there is no ne/none.wav.",
+    "",
+    "Changing wording here changes labels only -- class keys are what the model",
+    "was trained on, so no retraining, re-export or OOD refit is involved."
+  ],
+  "phrases": {
+    "cant_breathe": {
+      "order": 1,
+      "en": "I can't breathe",
+      "ne": "म सास फेर्न सक्दिन।",
+      "category": "Medical"
+    },
+    "building_on_fire": {
+      "order": 2,
+      "en": "The building is on fire",
+      "ne": "घरमा आगो लाग्यो।",
+      "category": "Fire"
+    },
+    "call_police": {
+      "order": 3,
+      "en": "Call the police",
+      "ne": "प्रहरीलाई बोलाऊ।",
+      "category": "Crime"
+    },
+    "need_ambulance": {
+      "order": 4,
+      "en": "I need an ambulance",
+      "ne": "मलाई एम्बुलेन्स चाहियो।",
+      "category": "Medical"
+    },
+    "help_danger": {
+      "order": 5,
+      "en": "Help me / I am in danger",
+      "ne": "मलाई मद्दत गर्नुहोस्, म खतरामा छु।",
+      "category": "Generic"
+    },
+    "need_toilet": {
+      "order": 6,
+      "en": "I need to go to the toilet",
+      "ne": "मलाई शौचालय जानु छ।",
+      "category": "Basic need"
+    },
+    "none": {
+      "order": 7,
+      "en": "Unknown / none of the above",
+      "ne": null,
+      "category": "negatives"
+    }
+  }
+}

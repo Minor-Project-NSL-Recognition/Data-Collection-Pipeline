@@ -57,13 +57,22 @@ class ResultBanner extends StatelessWidget {
     required this.color,
     required this.title,
     required this.body,
+    this.nepali,
   });
   final Color color;
   final String title;
   final String body;
 
+  /// The Nepali phrase, when there is one to show.
+  ///
+  /// Given top billing over [title] deliberately: it is what the app just said
+  /// out loud, and what a Nepali-speaking bystander needs to read. Null for
+  /// every non-accepted state, so a rejection cannot display a phrase.
+  final String? nepali;
+
   @override
   Widget build(BuildContext context) {
+    final ne = nepali;
     return Container(
       width: double.infinity,
       color: color,
@@ -71,11 +80,25 @@ class ResultBanner extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (ne != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 2),
+              // Devanagari needs more vertical room than Latin at the same
+              // point size: matras sit above the headline and below the
+              // baseline, and the default height clips them.
+              child: Text(ne,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 26,
+                      height: 1.5,
+                      fontWeight: FontWeight.bold)),
+            ),
           Text(title,
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold)),
+              style: TextStyle(
+                  color: ne == null ? Colors.white : Colors.white70,
+                  fontSize: ne == null ? 20 : 14,
+                  fontWeight:
+                      ne == null ? FontWeight.bold : FontWeight.normal)),
           if (body.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 4),

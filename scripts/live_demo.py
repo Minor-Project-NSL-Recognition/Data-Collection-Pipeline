@@ -37,6 +37,7 @@ from nslr import config as C
 from nslr import ood
 from nslr.landmarks import extract_frame_vector
 from nslr.preprocess import normalize_clip, standardize_length
+from nslr.voice import Voice
 
 
 WINDOW = "NSL Recognition"
@@ -73,21 +74,35 @@ def make_result(predictor, ood_stats, buffer, seq_len, class_names, threshold):
     """Classify `buffer` and package the answer the way the sidebar renders it.
 
     `state` drives every colour and heading in the UI, so the decision order —
-    open-set gate first, then the softmax threshold — lives here and nowhere
-    else."""
+    open-set gate first, then the negative class, then the softmax threshold —
+    lives here and nowhere else.
+
+    `key` is the class key and is what audio playback keys off. It is carried
+    separately from `phrase` precisely so playback never has to reverse a
+    human-readable string back into a class."""
     if len(buffer) < 5:
         return {"state": "short", "phrase": "Clip too short", "category": "",
                 "note": f"{len(buffer)} frames captured - need at least 5",
-                "conf": None, "top3": [], "dist": None, "t": time.time()}
+                "key": None, "conf": None, "top3": [], "dist": None,
+                "t": time.time()}
 
     key_name, conf, top3, dist = classify(predictor, ood_stats, buffer, seq_len, class_names)
     phrase, category = demo_ui.split_label(key_name, C.CLASSES.get(key_name, key_name))
-    common = {"top3": top3, "dist": dist, "conf": conf, "category": category,
-              "t": time.time()}
+    common = {"key": key_name, "top3": top3, "dist": dist, "conf": conf,
+              "category": category, "t": time.time()}
 
     if ood_stats is not None and dist > ood_stats[2]:
         return {"state": "ood", "phrase": "Unknown sign",
                 "note": "does not match any of the known phrases", **common}
+    # `none` is a real trained class (rest, random motion, partial signs), but it
+    # is the model declining to answer, not an answer. Reporting it as a MATCH
+    # put "No known sign" in the accepted slot at high confidence — and now that
+    # the demo speaks, it would also have announced a phrase at someone who did
+    # not sign one. The Dart offline path has always folded it in here; this is
+    # the same rule. server/inference.py still needs it.
+    if key_name == "none":
+        return {"state": "ood", "phrase": "No known sign",
+                "note": "matched the negative class", **common}
     if conf < threshold:
         return {"state": "low", "phrase": phrase,
                 "note": f"below the {threshold:.0%} confidence threshold", **common}
@@ -105,6 +120,8 @@ def main():
                    help="override the open-set reject distance (higher = more lenient)")
     p.add_argument("--no-ood", action="store_true",
                    help="disable open-set rejection entirely (accept whatever softmax picks)")
+    p.add_argument("--mute", action="store_true",
+                   help="do not play the Nepali audio for a recognised sign")
     p.add_argument("--cam-res", default="1280x720", metavar="WxH",
                    help="capture resolution to request from the camera (default: "
                         "1280x720). Landmark extraction costs more at higher "
@@ -158,6 +175,13 @@ def main():
     frame_h, frame_w = probe.shape[:2]
     if want and want != (frame_w, frame_h):
         print(f"Camera refused {want[0]}x{want[1]}; using {frame_w}x{frame_h}.")
+
+    # Nepali is spoken, not drawn: PIL in this venv has no raqm, so it cannot
+    # shape Devanagari and would place matras and conjuncts wrongly. The sidebar
+    # stays English; the phone app shows the script properly.
+    voice = Voice(class_names, verbose=not a.mute)
+    if a.mute:
+        voice.enabled = False
 
     labels = {k: demo_ui.split_label(k, C.CLASSES.get(k, k)) for k in class_names}
     ui = demo_ui.Dashboard(frame_w, frame_h, labels=labels, seq_len=seq_len,
@@ -223,6 +247,11 @@ def main():
                 recording = False
                 result = make_result(predictor, ood_stats, buffer, seq_len,
                                      class_names, threshold)
+                # Speak ONLY on a match. `low` and `ood` are the model
+                # declining to commit, and announcing a phrase it just rejected
+                # is worse than saying nothing at all.
+                if result["state"] == "ok":
+                    voice.play(result["key"])
         elif key in (ord("r"), ord("R")):
             result = None
         elif key in (ord("l"), ord("L")):
@@ -234,6 +263,7 @@ def main():
         elif key in (ord("q"), ord("Q"), 27):
             break
 
+    voice.stop()
     cap.release()
     holistic.close()
     cv2.destroyAllWindows()

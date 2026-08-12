@@ -8,17 +8,40 @@ import 'package:tflite_flutter/tflite_flutter.dart';
 import 'nslr_ood.dart';
 import 'nslr_preprocess.dart';
 
-/// Folder-safe class key -> spoken/displayed label. Mirrors `nslr/config.py`'s
-/// CLASSES so the offline path speaks exactly what the server would have.
-const Map<String, String> kClassLabels = {
-  'cant_breathe': "1. I can't breathe (Medical)",
-  'building_on_fire': '2. The building is on fire (Fire)',
-  'call_police': '3. Call the police (Crime)',
-  'need_ambulance': '4. I need an ambulance (Medical)',
-  'help_danger': '5. Help me / I am in danger (Generic)',
-  'need_toilet': '6. I need to go to the toilet (Basic need)',
-  'none': '7. Unknown / none of the above (negatives)',
-};
+/// One phrase in both languages, as authored in `assets/phrases.json`.
+///
+/// That file is the single source these strings come from; `nslr/config.py`
+/// loads the very same file, so this class replaces what used to be a
+/// hand-maintained Dart mirror of `config.CLASSES` — the kind of duplicate that
+/// stays correct only until someone edits one copy.
+class Phrase {
+  const Phrase({
+    required this.order,
+    required this.en,
+    required this.ne,
+    required this.category,
+  });
+
+  final int order;
+  final String en;
+
+  /// Null for `none`, and only for `none`: a rejected sign has no Nepali to
+  /// show and no clip to play.
+  final String? ne;
+
+  final String category;
+
+  /// The packed `N. text (Category)` form the server also sends as `display`,
+  /// so both paths put identical text on screen.
+  String get display => '$order. $en ($category)';
+
+  factory Phrase.fromJson(Map<String, dynamic> j) => Phrase(
+        order: (j['order'] as num).toInt(),
+        en: j['en'] as String,
+        ne: j['ne'] as String?,
+        category: j['category'] as String,
+      );
+}
 
 /// A guess with its probability, for the top-3 readout.
 class Guess {
@@ -33,6 +56,7 @@ class LocalResult {
     required this.status,
     required this.label,
     required this.display,
+    required this.displayNe,
     required this.confidence,
     required this.bestGuess,
     required this.top3,
@@ -47,6 +71,12 @@ class LocalResult {
   final String status;
   final String? label;
   final String? display;
+
+  /// The Nepali phrase to show and to speak. Non-null only when [status] is
+  /// `accepted`, which is the same gate [display] passes — so there is no state
+  /// in which the app can announce a phrase the model declined to commit to.
+  final String? displayNe;
+
   final double confidence;
   final String bestGuess;
   final List<Guess> top3;
@@ -80,6 +110,7 @@ class LocalRecognizer {
     this.seqLen,
     this.confidenceThreshold,
     this.ood,
+    this.phrases,
   );
 
   final Interpreter _interpreter;
@@ -89,6 +120,16 @@ class LocalRecognizer {
   final List<String> classNames;
   final int seqLen;
   final double confidenceThreshold;
+
+  /// Class key -> wording, loaded from `assets/phrases.json`.
+  final Map<String, Phrase> phrases;
+
+  /// Class keys the model can emit that [phrases] has no entry for. Empty in a
+  /// correct build; non-empty means the app would fall back to showing a raw
+  /// key like `need_toilet` to a user, so the UI surfaces it rather than
+  /// letting it pass as a cosmetic glitch.
+  List<String> get missingPhrases =>
+      classNames.where((k) => !phrases.containsKey(k)).toList();
 
   /// Null when `ood.json` is absent, which leaves the softmax closed-world — it
   /// would then name a phrase for any input at all, including nonsense.
@@ -101,6 +142,7 @@ class LocalRecognizer {
   static const _modelAsset = 'assets/models/model.tflite';
   static const _metaAsset = 'assets/models/model_meta.json';
   static const _oodAsset = 'assets/models/ood.json';
+  static const _phrasesAsset = 'assets/phrases.json';
 
   /// Loads the model and gates from bundled assets.
   ///
@@ -109,6 +151,18 @@ class LocalRecognizer {
   /// (151 -> 137 -> 146); hardcoding one would produce a shape mismatch at best
   /// and a silently mislabelled output at worst.
   static Future<LocalRecognizer> load() async {
+    // Phrase wording, from the same file `nslr/config.py` reads. Unlike the
+    // model assets this one is small and mandatory: without it the app has no
+    // text to display at all, so a failure here should be loud.
+    final phrasesRaw = await rootBundle.loadString(_phrasesAsset);
+    final phrasesJson =
+        (jsonDecode(phrasesRaw) as Map<String, dynamic>)['phrases']
+            as Map<String, dynamic>;
+    final phrases = phrasesJson.map(
+      (key, value) =>
+          MapEntry(key, Phrase.fromJson(value as Map<String, dynamic>)),
+    );
+
     final metaRaw = await rootBundle.loadString(_metaAsset);
     final meta = jsonDecode(metaRaw) as Map<String, dynamic>;
     final classNames = (meta['class_names'] as List).cast<String>();
@@ -195,6 +249,7 @@ class LocalRecognizer {
       seqLen,
       confThreshold,
       gate,
+      phrases,
     );
   }
 
@@ -320,10 +375,14 @@ class LocalRecognizer {
       status = 'low_confidence';
     }
 
+    final phrase = phrases[bestKey];
     return LocalResult(
       status: status,
       label: status == 'accepted' ? bestKey : null,
-      display: status == 'accepted' ? (kClassLabels[bestKey] ?? bestKey) : null,
+      display: status == 'accepted' ? (phrase?.display ?? bestKey) : null,
+      // `ne` is null for `none`, and `none` never reaches `accepted` anyway, so
+      // this is doubly guarded against announcing a non-sign in Nepali.
+      displayNe: status == 'accepted' ? phrase?.ne : null,
       confidence: confidence,
       bestGuess: bestKey,
       top3: order

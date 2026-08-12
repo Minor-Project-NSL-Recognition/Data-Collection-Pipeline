@@ -14,7 +14,8 @@ dependencies:
   web_socket_channel: ^3.0.1  # /ws/stream (server mode only)
   image: ^4.3.0               # YUV420 -> JPEG (server mode only)
   tflite_flutter: ^0.11.0     # on-device BiLSTM — the offline path
-  flutter_tts: ^4.2.0         # speaks the recognized phrase
+  just_audio: ^0.9.42         # plays the pre-recorded Nepali phrase
+  audio_session: ^0.1.21      # so it is audible with iOS's ringer switch muted
   shared_preferences: ^2.3.3  # remembers the server URL between runs
 
 dev_dependencies:
@@ -25,6 +26,10 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
+    # Phrase wording in English and Nepali. Hand-authored, and THE source both
+    # languages read -- nslr/config.py loads this exact file, so editing it is
+    # the only way to change a label anywhere in the project.
+    - assets/phrases.json
     # Everything the offline path needs. ~18 MB, dominated by the two MediaPipe
     # bundles; regenerate the three model files with:
     #   python scripts/train_model.py && python scripts/export_tflite.py
@@ -34,6 +39,8 @@ flutter:
     - assets/models/ood.json                   # Mahalanobis prototypes + threshold
     - assets/models/pose_landmarker_full.task  # 33 pose landmarks
     - assets/models/hand_landmarker.task       # 21 landmarks per hand
-  # Drop pre-recorded Nepali audio here later and swap flutter_tts for
-  # just_audio -- device TTS rarely has a usable ne-NP voice.
-  #   - assets/audio/
+    # One 48 kHz mono WAV per phrase, ~1.4 MB total, named by class key so the
+    # filename IS the mapping. There is deliberately no none.wav. Rebuild from
+    # the recordings in assets/audio/src/ with:
+    #   python scripts/build_audio.py
+    - assets/audio/ne/
