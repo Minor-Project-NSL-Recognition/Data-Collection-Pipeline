@@ -247,11 +247,15 @@ def main():
                 recording = False
                 result = make_result(predictor, ood_stats, buffer, seq_len,
                                      class_names, threshold)
-                # Speak ONLY on a match. `low` and `ood` are the model
-                # declining to commit, and announcing a phrase it just rejected
-                # is worse than saying nothing at all.
+                # A match speaks its phrase. `ood` (open-set reject or the
+                # `none` class) speaks the separate "not recognised" clip --
+                # never a phrase it just rejected. `low` stays silent: the
+                # model still named a real class, just under threshold, and
+                # that is not the same as "not a sign".
                 if result["state"] == "ok":
                     voice.play(result["key"])
+                elif result["state"] == "ood":
+                    voice.play_reject()
         elif key in (ord("r"), ord("R")):
             result = None
         elif key in (ord("l"), ord("L")):

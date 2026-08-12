@@ -28,6 +28,10 @@ from . import config as C
 
 AUDIO_DIR = os.path.join(C.REPO_ROOT, "app", "assets", "audio", "ne")
 
+# Spoken for a rejected clip (open-set gate or the `none` class). Not a class
+# key -- see scripts/build_audio.py's REJECT_KEY.
+REJECT_KEY = "unknown"
+
 
 def _posix_player():
     """First available CLI audio player, or None."""
@@ -62,9 +66,15 @@ class Voice:
              else missing.append(key))
         self.missing = missing
 
+        # Rejection feedback lives alongside the phrase clips but is loaded
+        # separately: it is not in class_names and must not gate `self.clips`.
+        reject_path = os.path.join(audio_dir, f"{REJECT_KEY}.wav")
+        self.reject_clip = reject_path if os.path.exists(reject_path) else None
+
         self._posix = None if sys.platform == "win32" else _posix_player()
-        self.enabled = bool(self.clips) and (sys.platform == "win32"
-                                             or self._posix is not None)
+        have_any = bool(self.clips) or self.reject_clip is not None
+        self.enabled = have_any and (sys.platform == "win32"
+                                     or self._posix is not None)
 
         if verbose:
             if not self.clips:
@@ -76,7 +86,9 @@ class Voice:
                       f"Silent: {', '.join(missing)}")
             else:
                 print(f"Nepali audio: all {len(self.clips)} phrases loaded.")
-            if self.clips and not self.enabled:
+            print(f"Rejection clip: {'loaded' if self.reject_clip else 'missing'} "
+                  f"({REJECT_KEY}.wav)")
+            if have_any and not self.enabled:
                 print("  ...but no audio player found (tried afplay/paplay/"
                       "aplay/ffplay) — playback disabled.")
 
@@ -85,7 +97,14 @@ class Voice:
 
         Never raises: a demo must not die because an audio device is busy.
         """
-        path = self.clips.get(key)
+        return self._play_path(self.clips.get(key), key)
+
+    def play_reject(self):
+        """Speak the "not recognised" clip for a rejected clip (open-set gate
+        or the `none` class). Same never-raises contract as `play`."""
+        return self._play_path(self.reject_clip, REJECT_KEY)
+
+    def _play_path(self, path, label):
         if path is None or not self.enabled:
             return False
         try:
@@ -110,7 +129,7 @@ class Voice:
                 ).start()
             return True
         except Exception as exc:              # noqa: BLE001 - never fatal
-            print(f"audio playback failed for {key}: {exc}")
+            print(f"audio playback failed for {label}: {exc}")
             return False
 
     def stop(self):

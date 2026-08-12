@@ -30,6 +30,12 @@ with no recording is reported and skipped -- the app treats a missing clip as
 "that phrase stays silent" rather than failing, so partial sets are fine while
 recording is still in progress.
 
+REJECT_KEY ("unknown") is built the same way but is NOT a phrase key: it is not
+in phrases.json, has no class, and is never chosen by the model. It is what
+scripts/live_demo.py speaks when a clip is rejected (open-set gate or the
+`none` class) -- audible "that didn't match" feedback, not a claimed answer, so
+the ban on `none` having audio does not apply to it.
+
     python scripts/build_audio.py            # convert everything present
     python scripts/build_audio.py --check    # report status, write nothing
 
@@ -54,6 +60,10 @@ OUT_DIR = os.path.join(C.REPO_ROOT, "app", "assets", "audio", "ne")
 
 # Anything ffmpeg can decode; listed in preference order when a key has several.
 SRC_EXTS = (".ogg", ".opus", ".m4a", ".mp3", ".wav", ".aac", ".flac")
+
+# Spoken once for any rejected clip (open-set reject or the `none` class). Not a
+# phrase key -- see the module docstring.
+REJECT_KEY = "unknown"
 
 # Speech on mobile. -1.5 dBTP leaves headroom so the lossy path to the speaker
 # cannot clip on the loudest syllable.
@@ -173,9 +183,9 @@ def main():
         raise SystemExit("ffmpeg and ffprobe must be on PATH.")
 
     # `none` is the open-set negative class. It must never get a clip: playing
-    # anything at all for a rejected sign is the failure this whole gate exists
-    # to prevent.
-    keys = [k for k in C.PHRASES if k != "none"]
+    # it as a claimed answer is the failure this whole gate exists to prevent.
+    # REJECT_KEY is added separately -- it speaks "rejected", not a phrase.
+    keys = [k for k in C.PHRASES if k != "none"] + [REJECT_KEY]
     os.makedirs(OUT_DIR, exist_ok=True)
 
     stray = os.path.join(SRC_DIR, "none.ogg")
